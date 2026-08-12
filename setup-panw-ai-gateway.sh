@@ -650,6 +650,15 @@ write_runtime_env() {
       for key in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
         emit_env "$key" "${!key:-}"
       done
+
+      # Lab escape hatch for TLS-inspecting proxies. The gateway is Node, which
+      # ignores the system trust store, so a re-signed chain fails with
+      # SELF_SIGNED_CERT_IN_CHAIN and the control plane is unreachable.
+      # This disables peer verification on every outbound connection, including
+      # to LLM providers -- see the warning in do_install.
+      if [ "${INSECURE_SKIP_TLS_VERIFY:-false}" = "true" ]; then
+        emit_env NODE_TLS_REJECT_UNAUTHORIZED "0"
+      fi
     } >"$RUNTIME_ENV_FILE"
   )
   chmod 600 "$RUNTIME_ENV_FILE"
@@ -936,6 +945,16 @@ do_install() {
 
   if ! version_ge "$GATEWAY_IMAGE_TAG" "$MIN_GATEWAY_VERSION"; then
     warn "Gateway tag $GATEWAY_IMAGE_TAG is below the minimum supported $MIN_GATEWAY_VERSION."
+  fi
+
+  if [ "${INSECURE_SKIP_TLS_VERIFY:-false}" = "true" ]; then
+    echo ""
+    warn "INSECURE_SKIP_TLS_VERIFY is enabled — TLS peer verification is OFF."
+    warn "This applies to every outbound connection, including LLM providers:"
+    warn "prompts and responses travel over unverified tunnels."
+    warn "Intended for lab and POC hosts behind a TLS-inspecting proxy."
+    warn "Never use it in production — supply a CA bundle instead."
+    echo ""
   fi
 
   local full_image="${GATEWAY_IMAGE_REPO}:${GATEWAY_IMAGE_TAG}"

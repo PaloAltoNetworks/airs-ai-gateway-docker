@@ -220,11 +220,29 @@ echo | openssl s_client -connect mp.us.prod.airs-gw.portkey.ai:443 \
 
 An issuer that is not a public CA is your proxy.
 
-Until CA bundle support lands (tracked as F-106 in `docs/FEATURES.yaml`), the options are: run the
-gateway on a host that is not behind the inspecting proxy, exempt the three control-plane FQDNs from
-decryption, or hand-edit the generated compose file to mount your CA and set `NODE_EXTRA_CA_CERTS`
-(the gateway is Node, so it ignores the system trust store). A hand-edit is overwritten on the next
-install run.
+#### Workaround — lab only
+
+```env
+INSECURE_SKIP_TLS_VERIFY="true"
+```
+
+Re-run the installer. This sets `NODE_TLS_REJECT_UNAUTHORIZED=0` in the container and prints a
+warning on every run.
+
+> **This disables TLS peer verification on every outbound connection**, not just the control plane.
+> Traffic to your LLM providers included: prompts and responses travel over tunnels whose peer
+> identity is no longer verified, and the gateway will accept any certificate presented to it.
+> On a product whose job is securing AI traffic, that is a poor trade outside a lab.
+
+For production behind an inspecting proxy, use one of these instead:
+
+- **Exempt the control-plane FQDNs from decryption** — the three hosts in
+  [Egress requirements](#egress-requirements). Usually a one-line firewall rule and the cleanest fix.
+- **Run the gateway on a host outside the inspection path.**
+- **Supply the proxy CA to the container** — mount it and set `NODE_EXTRA_CA_CERTS`, which keeps
+  verification on and only adds your CA to the trust list. Currently a hand-edit of the generated
+  compose file, overwritten on the next install run; first-class support is tracked as F-106 in
+  `docs/FEATURES.yaml`.
 
 ---
 

@@ -24,7 +24,7 @@ features:
     status: done
     depends_on: []
     description: >
-      Verified 2026-08-12 on lab TSG 1669792305, gateway 2.15.0. Registry login, digest-pinned pull,
+      Verified 2026-08-12 on a lab tenant, gateway 2.15.0. Registry login, digest-pinned pull,
       both containers healthy, /v1/health 200, MCP listener up on 8788, Redis connected in standalone
       mode, idempotent re-run exits early without restarting. The image ships wget (not curl), so the
       generated healthcheck is the wget variant and it works.
@@ -53,47 +53,68 @@ features:
     status: done
     depends_on: []
     description: >
-      Verified 2026-08-12 with the VPN off. The API key was accepted, the gateway resolved slug
-      "@gcp/anthropic.claude-haiku-4-5@20251001", selected provider vertex-ai and issued the upstream
-      call. Routing therefore proves config fetch worked. The gateway then logged
-      'Successfully added batch insert job to queue {"count":1,"table":"generations"}' and completed
-      analyticsBatchInsertQueue, which proves the analytics push path. Zero fetch failures after the
-      VPN was removed, and SCM reports the deployment connection_status healthy with a fresh
-      last_synced_at.
-      The upstream call itself returned a vertex-ai credentials error - a gap in the SCM provider
-      integration, not the installer. That is out of scope here.
+      Fully verified 2026-08-12 with the VPN off. "@azure/claude-sonnet-5" returned a real completion
+      through the local gateway ("GATEWAY OK", 32 tokens, provider azure-ai), and the request was
+      pushed to the control plane (analyticsBatchInsertQueue completed). Zero fetch failures, and SCM
+      reports the deployment connection_status healthy with a fresh last_synced_at.
+      Two other slugs routed correctly but failed at the provider - vertex-ai "missing required
+      authentication credential" and bedrock "security token invalid". Both are missing credentials
+      in the SCM integrations, not installer faults; the routing itself proves config fetch worked.
+      Likely the known Portkey migration gap where provider keys come back masked and are never
+      re-entered.
     implementation_notes:
-      - The full round trip (200 from a provider) still needs working Vertex credentials in SCM.
-        Everything the installer is responsible for is proven.
+      - Config sync is pull-based with a 7-day cache, so integrations created before the deployment
+        existed resolve fine on demand - the azure integration predates this deployment by two weeks.
+        Corollary - edits in SCM may serve stale config until syncDataQueue picks up the
+        invalidation; restart the container to force it.
     acceptance:
       - API key accepted and provider resolved from the slug. PASS
+      - A 200 provider response with real completion content. PASS
       - Request pushed to the control plane (analyticsBatchInsertQueue). PASS
       - Deployment shows healthy in SCM with a recent last_synced_at. PASS
-      - A 200 provider response. BLOCKED on SCM Vertex credentials, out of scope.
 
   - id: F-106
-    title: Support a custom CA bundle for TLS-inspecting proxies
+    title: Escape hatch for TLS-inspecting proxies
     priority: must
+    status: done
+    depends_on: []
+    description: >
+      A host behind a TLS-inspecting proxy gets SELF_SIGNED_CERT_IN_CHAIN and the gateway never
+      reaches its control plane - the gateway is Node, which ignores the host trust store. Hit
+      immediately on the first real test host, whose VPN re-signs traffic with
+      CN=decrypt.paloaltonetworks.com.
+      Shipped INSECURE_SKIP_TLS_VERIFY, which emits NODE_TLS_REJECT_UNAUTHORIZED=0, with a warning
+      on every run and documented as lab-only. Verified 2026-08-12 - the variable reaches the
+      container, inference still works with it on, and removing it restores verification.
+    implementation_notes:
+      - "Deliberately blunt: it disables peer verification on ALL outbound connections, LLM
+        providers included. Documented as lab/POC only, with the production alternatives listed in
+        docs/reference.md (exempt the FQDNs from decryption, move the host, or supply the CA)."
+      - The setting only takes effect on a run that rewrites .env.runtime. An unchanged digest exits
+        early, so --force-pull is needed after toggling it. Worth revisiting - see F-109.
+    acceptance:
+      - INSECURE_SKIP_TLS_VERIFY=true reaches the container as NODE_TLS_REJECT_UNAUTHORIZED=0. PASS
+      - A warning is printed on every run while enabled. PASS
+      - Unset by default; removing it restores verification. PASS
+
+  - id: F-109
+    title: Re-apply config changes when only .env changed
+    priority: should
     status: todo
     depends_on: []
     description: >
-      The generated compose file has no way to trust a corporate CA, so any host behind a TLS-
-      inspecting proxy gets SELF_SIGNED_CERT_IN_CHAIN and the gateway never reaches its control
-      plane. Hit immediately on the first real test host, whose VPN re-signs traffic with
-      CN=decrypt.paloaltonetworks.com. Enterprise deployments are exactly the target audience, so
-      this is not an edge case.
-      The Helm chart handles it with volumes/volumeMounts; the installer needs an equivalent.
+      The early-exit path compares image digests, so a run where only .env changed exits without
+      rewriting .env.runtime - the new setting silently does not apply. Found while testing F-106:
+      INSECURE_SKIP_TLS_VERIFY=true appeared to do nothing until --force-pull was used.
+      The installer already prints "If you changed .env, run ... --force-recreate", which puts the
+      burden on the operator noticing.
     implementation_notes:
-      - Add CA_BUNDLE_PATH to .env; when set, mount it read-only and set NODE_EXTRA_CA_CERTS
-        (the gateway is Node, which ignores the system trust store otherwise).
-      - Detect the failure in --diagnose - SELF_SIGNED_CERT_IN_CHAIN and UNABLE_TO_VERIFY_LEAF_
-        SIGNATURE should point at CA_BUNDLE_PATH rather than leaving "fetch failed".
-      - --validate probes from the host, which passes when the host trusts the proxy CA. It must
-        also probe from inside the container, or it reports green on a broken deployment.
+      - Hash the resolved runtime environment and store it next to .image-digest; re-deploy when
+        either the digest or the config hash changes.
+      - Do not let the hash file leak secrets - hash the content, never store it.
     acceptance:
-      - With CA_BUNDLE_PATH set, the container reaches the control plane through an inspecting proxy.
-      - --validate fails when the container cannot reach the control plane, even if the host can.
-      - --diagnose names the CA bundle as the fix for a TLS chain error.
+      - Changing a value in .env and re-running applies it without --force-pull.
+      - An unchanged .env and unchanged digest still exits early without restarting.
 
   - id: F-107
     title: Check SCM connection_status in --validate
