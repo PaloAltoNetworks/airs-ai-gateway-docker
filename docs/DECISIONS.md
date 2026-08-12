@@ -89,6 +89,25 @@ the published port.
 
 Same trade-off as the Red Teaming installer hit with its distroless-to-busybox base change.
 
+## ADR-008 — Run Redis as its own uid instead of granting CAP_SETUID
+
+**Status:** accepted
+
+The `redis:7.2-alpine` entrypoint starts as root and drops to the `redis` user via `setpriv`, which
+needs `CAP_SETUID`. Under `cap_drop: ALL` that call fails, the container loops on
+`setpriv: setresuid failed: Operation not permitted`, and the gateway never starts because it waits
+on a healthy Redis.
+
+Two ways out: add back `CAP_SETUID`, or start the container as the target uid so no identity change
+is attempted. The second keeps every capability dropped, so that is what `write_compose` does.
+
+The uid is detected from the image (`detect_redis_uid`) rather than hardcoded, since a pinned or
+custom Redis image may number its user differently — the stock image is 999:1000. Falls back to
+999:1000 when detection fails.
+
+Found by deploying for real; the chart never hits this because Kubernetes applies `runAsUser`
+directly and the chart leaves Redis's own `securityContext` empty.
+
 ## ADR-006 — Reproduce the chart's hidden defaults explicitly
 
 **Status:** accepted

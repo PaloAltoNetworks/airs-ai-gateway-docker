@@ -669,6 +669,19 @@ detect_health_client() {
   fi
 }
 
+# Resolve the uid:gid the redis image expects to run as. Hardcoding it would
+# break a custom or pinned image that numbers its user differently.
+detect_redis_uid() {
+  local image="$1" ids
+  ids=$(docker run --rm --entrypoint sh "$image" -c 'id -u redis; id -g redis' 2>/dev/null |
+    tr '\n' ':' | sed 's/:$//')
+  if [[ "$ids" =~ ^[0-9]+:[0-9]+$ ]]; then
+    printf '%s' "$ids"
+  else
+    printf '999:1000'
+  fi
+}
+
 write_compose() {
   local image="$1" external_redis="$2" health_client="$3"
 
@@ -682,6 +695,9 @@ write_compose() {
   local mem_limit="${GATEWAY_MEM_LIMIT:-2g}"
   local cpus="${GATEWAY_CPUS:-2.0}"
 
+  local REDIS_UID=""
+  [ "$external_redis" != true ] && REDIS_UID="$(detect_redis_uid "${REDIS_IMAGE:-$DEFAULT_REDIS_IMAGE}")"
+
   {
     printf 'services:\n'
 
@@ -693,6 +709,10 @@ write_compose() {
     command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     volumes:
       - airs-gw-redis-data:/data
+    # The image's entrypoint drops root to the redis user with setpriv, which
+    # needs CAP_SETUID -- incompatible with cap_drop: ALL. Starting as that uid
+    # directly means no identity change is attempted, so no capability is needed.
+    user: "${REDIS_UID}"
     security_opt:
       - no-new-privileges:true
     cap_drop:
