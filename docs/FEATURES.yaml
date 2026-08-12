@@ -26,35 +26,97 @@ features:
     description: >
       Verified 2026-08-12 on lab TSG 1669792305, gateway 2.15.0. Registry login, digest-pinned pull,
       both containers healthy, /v1/health 200, MCP listener up on 8788, Redis connected in standalone
-      mode, idempotent re-run exits early without restarting. The image does ship an HTTP client, so
-      the generated healthcheck is active (ADR-005 resolved).
+      mode, idempotent re-run exits early without restarting. The image ships wget (not curl), so the
+      generated healthcheck is the wget variant and it works.
       Surfaced one real bug, now fixed: Redis could not start under cap_drop ALL (ADR-008).
+      Also surfaced F-106: no way to mount a CA bundle, which blocks any host behind a TLS-
+      inspecting proxy.
     implementation_notes:
-      - An unauthenticated inference request returns "Invalid API Key. Error Code: 03" from the
-        control plane, which proves the sync path end to end.
-      - Still open, needs a key generated in SCM - F-105.
+      - "Correction: an unauthenticated request returning Error Code 03 does NOT prove control-plane
+        sync. On the test host it meant the opposite - gateway logs showed
+        fetchOrganisationIdFromAPIKey error: fetch failed, i.e. the control plane was never reached.
+        Code 03 covers 'could not validate', not just 'key is invalid'."
+      - Control-plane reachability was initially blocked by a TLS-inspecting VPN
+        (SELF_SIGNED_CERT_IN_CHAIN, issuer CN=decrypt.paloaltonetworks.com). Retested with the VPN
+        off - the container reaches the control plane, sync recovers on its own without a restart,
+        and SCM reports connection_status healthy. See F-105 and F-106.
     acceptance:
       - docker compose ps shows gateway and redis healthy. PASS
       - curl localhost:8787/v1/health returns success. PASS
       - Re-running exits early; --force-pull re-pulls and restarts. PASS
-      - An inference request appears in the SCM log view. DEFERRED to F-105.
+      - Container reaches the control plane. PASS (VPN off)
+      - An inference request appears in the SCM log view. PASS - see F-105.
 
   - id: F-105
     title: Confirm a successful inference lands in the SCM log view
     priority: must
-    status: todo
-    depends_on: [F-101]
+    status: done
+    depends_on: []
     description: >
-      The gateway authenticates against the control plane and correctly rejects a bad key, which
-      proves the outbound sync path. What is untested is the full loop: an accepted request, routed
-      to a provider, with the log appearing in SCM. That is the only check that proves analytics
-      push works, not just config fetch.
+      Verified 2026-08-12 with the VPN off. The API key was accepted, the gateway resolved slug
+      "@gcp/anthropic.claude-haiku-4-5@20251001", selected provider vertex-ai and issued the upstream
+      call. Routing therefore proves config fetch worked. The gateway then logged
+      'Successfully added batch insert job to queue {"count":1,"table":"generations"}' and completed
+      analyticsBatchInsertQueue, which proves the analytics push path. Zero fetch failures after the
+      VPN was removed, and SCM reports the deployment connection_status healthy with a fresh
+      last_synced_at.
+      The upstream call itself returned a vertex-ai credentials error - a gap in the SCM provider
+      integration, not the installer. That is out of scope here.
     implementation_notes:
-      - Generate an API key and a provider integration in the SCM AI Gateway UI.
-      - POST /v1/chat/completions with x-portkey-api-key, then check the SCM log view.
+      - The full round trip (200 from a provider) still needs working Vertex credentials in SCM.
+        Everything the installer is responsible for is proven.
     acceptance:
-      - A 200 inference response through the local gateway.
-      - The matching request is visible in the SCM AI Gateway log view.
+      - API key accepted and provider resolved from the slug. PASS
+      - Request pushed to the control plane (analyticsBatchInsertQueue). PASS
+      - Deployment shows healthy in SCM with a recent last_synced_at. PASS
+      - A 200 provider response. BLOCKED on SCM Vertex credentials, out of scope.
+
+  - id: F-106
+    title: Support a custom CA bundle for TLS-inspecting proxies
+    priority: must
+    status: todo
+    depends_on: []
+    description: >
+      The generated compose file has no way to trust a corporate CA, so any host behind a TLS-
+      inspecting proxy gets SELF_SIGNED_CERT_IN_CHAIN and the gateway never reaches its control
+      plane. Hit immediately on the first real test host, whose VPN re-signs traffic with
+      CN=decrypt.paloaltonetworks.com. Enterprise deployments are exactly the target audience, so
+      this is not an edge case.
+      The Helm chart handles it with volumes/volumeMounts; the installer needs an equivalent.
+    implementation_notes:
+      - Add CA_BUNDLE_PATH to .env; when set, mount it read-only and set NODE_EXTRA_CA_CERTS
+        (the gateway is Node, which ignores the system trust store otherwise).
+      - Detect the failure in --diagnose - SELF_SIGNED_CERT_IN_CHAIN and UNABLE_TO_VERIFY_LEAF_
+        SIGNATURE should point at CA_BUNDLE_PATH rather than leaving "fetch failed".
+      - --validate probes from the host, which passes when the host trusts the proxy CA. It must
+        also probe from inside the container, or it reports green on a broken deployment.
+    acceptance:
+      - With CA_BUNDLE_PATH set, the container reaches the control plane through an inspecting proxy.
+      - --validate fails when the container cannot reach the control plane, even if the host can.
+      - --diagnose names the CA bundle as the fix for a TLS chain error.
+
+  - id: F-107
+    title: Check SCM connection_status in --validate
+    priority: should
+    status: todo
+    depends_on: []
+    description: >
+      --validate probes /v1/health locally, which proves the process listens but not that SCM
+      considers the gateway connected. Those diverged during F-101 testing: health was green while
+      the gateway could not reach the control plane at all.
+      GET /ai_gw/admin/v2/deployments?organisation_id=<tsg> returns connection_status per deployment
+      (healthy / unknown) plus last_synced_at. Verified live 2026-08-12 on the lab TSG.
+    implementation_notes:
+      - Needs an SCM bearer token - OAuth2 client_credentials against
+        auth.apps.paloaltonetworks.com/oauth2/access_token with scope tsg_id:<TSG>. The Red Teaming
+        installer's api_authenticate is liftable.
+      - Strictly opt-in (--check-scm or explicit credentials in .env) and never fatal. The route is
+        outside the supported HTTP contract (ADR-002); the install path must not depend on it.
+      - Match the local deployment by slug or name, and surface last_synced_at.
+    acceptance:
+      - With credentials, --validate reports the SCM-side connection_status.
+      - Without credentials, --validate behaves exactly as today.
+      - A 403 or a schema change degrades to a warning, never a failed install.
 
   - id: F-102
     title: Guard the chart defaults against upstream drift

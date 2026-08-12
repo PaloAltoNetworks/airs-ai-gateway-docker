@@ -39,6 +39,20 @@ upstream deploy we do not control.
 Revisit if PANW publishes a gateway-registration endpoint; the change is contained to
 `do_from_values` and would reduce the CLI to two prompts.
 
+**Update 2026-08-12 — the `deployments` route is live.** `GET /ai_gw/admin/v2/deployments?organisation_id=<tsg>`
+returns 200 with the deployment list: `id`, `name`, `slug`, `type`, `status`, `is_default`,
+`last_synced_at`, and `connection_status` (`healthy` / `unknown`). Observed with a superuser SCM
+bearer token on the lab TSG.
+
+That is a genuine opening, but it does not by itself replace `values.yaml`: the response carries no
+`PORTKEY_CLIENT_AUTH` and no registry credentials, which are the two things the installer actually
+needs. Whether a sibling route issues them (`deployments/{id}/credentials` or similar) is untested.
+
+What it *does* unlock today is verification: `--validate` currently probes `/v1/health` locally,
+which cannot see whether SCM considers the gateway connected. `connection_status` is the
+authoritative answer. Tracked as F-107, kept opt-in and non-fatal — the route remains outside the
+supported contract, so the install path must never depend on it.
+
 ## ADR-003 — Scope is gateway + Redis
 
 **Status:** accepted
@@ -83,11 +97,17 @@ client needed. Docker healthchecks run *inside* the container, so they need `cur
 present, and the gateway image may well be distroless.
 
 The installer probes the pulled image once and emits a healthcheck only when a client exists,
-otherwise omitting it. `restart: unless-stopped` covers crash recovery either way, and `--validate`
-probes `/v1/health` from the host, which is the more meaningful test anyway since it also exercises
-the published port.
+otherwise omitting it. `restart: unless-stopped` covers crash recovery either way.
 
-Same trade-off as the Red Teaming installer hit with its distroless-to-busybox base change.
+Verified on gateway `2.15.0`: the image ships **`wget`, not `curl`** (also `nc` and `node`), so the
+wget variant is what actually runs. Detection is still worth keeping — the base image is upstream's
+to change, exactly as the Red Teaming client did when it moved from distroless to busybox.
+
+**Caveat, learned the hard way:** `--validate` probes `/v1/health` from the host, which only proves
+the process is listening. It says nothing about whether the *container* can reach the control plane.
+On a host behind a TLS-inspecting proxy the host probe passes while the gateway is entirely unable
+to sync — a green `--validate` on a broken deployment. F-106 fixes this by probing from inside the
+container too.
 
 ## ADR-008 — Run Redis as its own uid instead of granting CAP_SETUID
 

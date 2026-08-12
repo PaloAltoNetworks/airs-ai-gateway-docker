@@ -1202,9 +1202,20 @@ do_diagnose() {
     "Network connectivity failure" \
     "Allow outbound HTTPS to mp.us.prod.airs-gw.portkey.ai and aigw.portkey.ai."
 
-  match_log "certificate\|self.signed\|tls\|ssl.*error" \
+  match_log "self_signed_cert\|unable_to_verify_leaf\|cert_has_expired\|depth_zero_self_signed" \
+    "TLS chain rejected — a TLS-inspecting proxy (corporate VPN, SSL decryption) is intercepting" \
+    "The container does not trust the proxy CA even though the host does. See 'TLS-inspecting proxies' in docs/reference.md."
+
+  match_log "certificate\|self.signed\|ssl.*error" \
     "TLS/certificate error" \
-    "A TLS-intercepting proxy is likely. Mount your CA bundle into the container."
+    "Check whether a proxy is re-signing traffic: docker compose exec $GATEWAY_SERVICE node -e 'fetch(\"https://mp.us.prod.airs-gw.portkey.ai/api\").catch(e=>console.log(e.cause?.code))'"
+
+  # The gateway logs a bare "fetch failed" when it cannot reach the control
+  # plane. Left unexplained this looks like a key problem, because every API key
+  # is then rejected with Error Code 03 regardless of validity.
+  match_log "fetch failed\|fetchorganisationidfromapikey" \
+    "Control plane unreachable — the gateway cannot validate API keys or sync config" \
+    "Every key will be rejected with 'Error Code: 03' until this is fixed. Check egress to mp.us.prod.airs-gw.portkey.ai, then TLS interception. Note --validate probes from the host and can pass while this is broken."
 
   match_log "eacces\|permission denied\|read-only file system" \
     "Permission error" \

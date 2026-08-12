@@ -187,8 +187,44 @@ HTTPS_PROXY="http://proxy.example.com:8080"
 NO_PROXY="localhost,127.0.0.1"
 ```
 
-A TLS-intercepting proxy needs its CA bundle mounted into the container — add a `volumes:` entry to
-the generated compose file, and note that it will be overwritten on the next install run.
+### TLS-inspecting proxies (corporate VPN)
+
+If your host re-signs TLS traffic — a corporate VPN, an SSL-decrypting firewall, Zscaler and
+friends — the gateway will fail to reach its control plane even though the host reaches it fine.
+The host trusts the proxy's CA; the container does not.
+
+Symptoms:
+
+```
+error: fetchOrganisationIdFromAPIKey error: fetch failed
+error: Job N failed in queue syncDataQueue fetch failed
+```
+
+and every API key rejected with `Portkey Error: Invalid API Key. Error Code: 03` — which means
+"could not validate this key", not "this key is wrong".
+
+Confirm it is TLS and not DNS or firewall:
+
+```bash
+docker compose exec airs-gw-gateway node -e \
+  'fetch("https://mp.us.prod.airs-gw.portkey.ai/api").then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code))'
+```
+
+`SELF_SIGNED_CERT_IN_CHAIN` or `UNABLE_TO_VERIFY_LEAF_SIGNATURE` confirms interception. Identify the
+issuer from the host:
+
+```bash
+echo | openssl s_client -connect mp.us.prod.airs-gw.portkey.ai:443 \
+  -servername mp.us.prod.airs-gw.portkey.ai 2>/dev/null | openssl x509 -noout -issuer
+```
+
+An issuer that is not a public CA is your proxy.
+
+Until CA bundle support lands (tracked as F-106 in `docs/FEATURES.yaml`), the options are: run the
+gateway on a host that is not behind the inspecting proxy, exempt the three control-plane FQDNs from
+decryption, or hand-edit the generated compose file to mount your CA and set `NODE_EXTRA_CA_CERTS`
+(the gateway is Node, so it ignores the system trust store). A hand-edit is overwritten on the next
+install run.
 
 ---
 
@@ -267,15 +303,26 @@ docker stats airs-gw-gateway                # resource usage
 ### Health
 
 Where the image ships `curl` or `wget`, the installer emits a Docker healthcheck against
-`/v1/health`. Distroless images get none — `restart: unless-stopped` covers crashes, and
-`--validate` probes from the host, which also exercises the published port.
+`/v1/health`. Gateway `2.15.0` ships `wget`, so the check is active. Distroless images would get
+none, with `restart: unless-stopped` covering crashes.
 
 ```bash
 curl -s localhost:8787/v1/health
 ```
 
-A health check confirms the process is up, not that it is syncing. To confirm end to end: send an
-inference request through the gateway and check it appears in the SCM AI Gateway log view.
+**A green health check does not mean the gateway is working.** It proves the process is listening,
+nothing more. In particular, `--validate` probes from the *host*, so on a machine behind a
+TLS-inspecting proxy it reports success while the container cannot reach the control plane at all.
+
+To tell the difference, look for sync failures in the logs:
+
+```bash
+docker compose logs airs-gw-gateway | grep -i "fetch failed\|fetchOrganisationIdFromAPIKey"
+```
+
+If those appear, the gateway is isolated — see
+[TLS-inspecting proxies](#tls-inspecting-proxies-corporate-vpn). The only real end-to-end proof is
+an inference request that shows up in the SCM AI Gateway log view.
 
 ### Updating
 
@@ -312,8 +359,10 @@ Run `--diagnose` first — it pattern-matches the last 500 log lines.
 | Container exits immediately | Bad `PORTKEY_CLIENT_AUTH` | `--diagnose`; re-register the gateway |
 | Redis connection refused | Bundled Redis unhealthy, or bad `REDIS_URL` | `--status`; check `REDIS_PASSWORD` / TLS for external |
 | Health check fails, logs look clean | Wrong `PORT` vs `service.containerPort` | Compare `.env` `PORT` and `HOST_PORT` |
+| **Every** key rejected with `Error Code: 03` | Control plane unreachable — the key is probably fine | Check logs for `fetch failed`; see [TLS-inspecting proxies](#tls-inspecting-proxies-corporate-vpn) |
+| `fetch failed` in the logs, `--validate` green | Container cannot egress, host can | [TLS-inspecting proxies](#tls-inspecting-proxies-corporate-vpn) |
 | Gateway runs, nothing in SCM logs | Management plane unreachable | Allow egress to `mp.us.prod.airs-gw.portkey.ai` |
-| TLS / certificate errors | Intercepting proxy | Mount your CA bundle into the container |
+| `SELF_SIGNED_CERT_IN_CHAIN` | Corporate VPN / SSL decryption | [TLS-inspecting proxies](#tls-inspecting-proxies-corporate-vpn) |
 | `read-only file system` | Something writing outside `/tmp` | Expected — the rootfs is immutable by design |
 | `docker compose` not found | Compose plugin missing | `apt install docker-compose-plugin` |
 
