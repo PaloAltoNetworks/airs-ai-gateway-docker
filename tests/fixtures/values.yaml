@@ -1,0 +1,23 @@
+# REDACTED fixture — mirrors the shape of the values.yaml downloaded from
+# Strata Cloud Manager (AI Gateway > Gateway Registration > Download values.yaml).
+# All credentials here are fake. Never commit a real one.
+
+imageCredentials:
+  - name: airsgatewayregistrycredentials
+    create: true
+    registry: "https://registry.portkey.ai"
+    username: "1234567890"
+    password: "00000000-0000-0000-0000-000000000000"
+
+environment:
+  create: true
+  secret: true
+  data:
+    PORTKEY_CLIENT_AUTH: "client-auth-REDACTEDREDACTEDREDACTEDREDACTED"
+    ORGANISATIONS_TO_SYNC: "11111111-2222-3333-4444-555555555555"
+    PORT: "8787"
+
+service:
+  type: LoadBalancer
+  port: 80
+  containerPort: 8787

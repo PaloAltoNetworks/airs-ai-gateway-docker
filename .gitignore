@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+*.bak
+docker-compose.yml
+values.yaml
+!tests/fixtures/values.yaml
+deploy.log
+.image-digest
+.claude*
+*.csv

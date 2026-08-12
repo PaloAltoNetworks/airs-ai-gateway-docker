@@ -1,0 +1,90 @@
+project:
+  name: airs-ai-gateway-docker
+  version: "0.1.0"
+  product_goal: >
+    One-command Docker Compose installer for the Prisma AIRS AI Gateway hybrid data plane
+    (gateway + Redis), driven by the values.yaml issued by Strata Cloud Manager. The shipped
+    surface (FR1-FR9) is documented in docs/PRD.md. This file tracks only planned / open work.
+
+conventions:
+  statuses: [todo, in_progress, blocked, done]
+  priorities: [must, should, could]
+  rules:
+    - Implement one feature at a time; do not silently expand scope.
+    - Use plan mode before any multi-file or architectural change.
+    - Add or update tests/validation for every behavior change.
+    - Keep ShellCheck clean and shfmt-formatted (2-space).
+    - Never write secrets to deploy.log, process listings, or committed files.
+    - Do not mark a feature done until its acceptance criteria pass.
+
+features:
+  - id: F-101
+    title: Verify against a real gateway deployment
+    priority: must
+    status: todo
+    depends_on: []
+    description: >
+      The installer has been validated against a redacted fixture and lint, but never against a live
+      registry, a real image pull, or a running gateway. Until that happens the healthcheck detection
+      and the control-plane sync path are unproven.
+    implementation_notes:
+      - Use the lab TSG and a freshly registered gateway; do not reuse the credentials that were
+        sitting in ~/Downloads.
+      - Confirm the gateway image ships curl or wget, and record the answer in ADR-005.
+      - Send an inference request and confirm it appears in the SCM AI Gateway log view.
+    acceptance:
+      - docker compose ps shows gateway and redis healthy.
+      - curl localhost:8787/v1/health returns success.
+      - An inference request appears in the SCM log view (proves control-plane sync).
+      - Re-running exits early; --force-pull re-pulls and restarts.
+
+  - id: F-102
+    title: Guard the chart defaults against upstream drift
+    priority: should
+    status: todo
+    depends_on: [F-101]
+    description: >
+      CHART_ENV_DEFAULTS mirrors airsgateway.builtinDefaults and the chart's environment.data. When
+      upstream changes either, the installer silently produces a gateway that never syncs. This is
+      the highest-consequence failure mode in the project and currently has no automated detection.
+    implementation_notes:
+      - A CI job that fetches _helpers.tpl and values.yaml from the pinned chart tag and diffs the
+        default set against the script's constants would catch it.
+      - Failing loudly on drift is better than auto-updating; the merge semantics need a human read.
+      - Pin the chart version the installer claims to reproduce, and surface it in --script-version.
+    acceptance:
+      - CI fails when the upstream default set diverges from CHART_ENV_DEFAULTS.
+      - The check names which variable drifted.
+
+  - id: F-103
+    title: Fail loudly when values.yaml has an unexpected shape
+    priority: should
+    status: todo
+    depends_on: []
+    description: >
+      The awk fallback reader returns empty for anything it does not recognise, so callers apply
+      defaults. That is right for optional keys but wrong for a restructured file: a gateway would
+      be built from defaults plus two required keys, with the rest silently dropped.
+    implementation_notes:
+      - Sanity-check the file up front — imageCredentials present, environment.data non-empty.
+      - Warn when values.yaml carries environment.data keys the installer does not pass through
+        (i.e. absent from CORE_ENV_KEYS, CACHE_STORE_KEYS and LOG_STORE_KEYS), since that is the
+        signal a new chart feature arrived.
+    acceptance:
+      - A values.yaml missing imageCredentials or environment.data fails with a clear message.
+      - Unrecognised environment.data keys produce a warning naming them.
+
+  - id: F-104
+    title: Guard against .gitignore regression in CI
+    priority: could
+    status: todo
+    depends_on: []
+    description: >
+      .gitignore protects the generated secrets (.env, .env.runtime, docker-compose.yml, deploy.log,
+      values.yaml). A future change could start tracking them unnoticed.
+    implementation_notes:
+      - Assert with git check-ignore and git ls-files.
+      - Keep the workflow SHA-pinned like the others.
+    acceptance:
+      - CI fails if any sensitive path becomes tracked or un-ignored.
+      - The check runs on push and PR.
