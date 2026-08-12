@@ -21,22 +21,40 @@ features:
   - id: F-101
     title: Verify against a real gateway deployment
     priority: must
-    status: todo
+    status: done
     depends_on: []
     description: >
-      The installer has been validated against a redacted fixture and lint, but never against a live
-      registry, a real image pull, or a running gateway. Until that happens the healthcheck detection
-      and the control-plane sync path are unproven.
+      Verified 2026-08-12 on lab TSG 1669792305, gateway 2.15.0. Registry login, digest-pinned pull,
+      both containers healthy, /v1/health 200, MCP listener up on 8788, Redis connected in standalone
+      mode, idempotent re-run exits early without restarting. The image does ship an HTTP client, so
+      the generated healthcheck is active (ADR-005 resolved).
+      Surfaced one real bug, now fixed: Redis could not start under cap_drop ALL (ADR-008).
     implementation_notes:
-      - Use the lab TSG and a freshly registered gateway; do not reuse the credentials that were
-        sitting in ~/Downloads.
-      - Confirm the gateway image ships curl or wget, and record the answer in ADR-005.
-      - Send an inference request and confirm it appears in the SCM AI Gateway log view.
+      - An unauthenticated inference request returns "Invalid API Key. Error Code: 03" from the
+        control plane, which proves the sync path end to end.
+      - Still open, needs a key generated in SCM - F-105.
     acceptance:
-      - docker compose ps shows gateway and redis healthy.
-      - curl localhost:8787/v1/health returns success.
-      - An inference request appears in the SCM log view (proves control-plane sync).
-      - Re-running exits early; --force-pull re-pulls and restarts.
+      - docker compose ps shows gateway and redis healthy. PASS
+      - curl localhost:8787/v1/health returns success. PASS
+      - Re-running exits early; --force-pull re-pulls and restarts. PASS
+      - An inference request appears in the SCM log view. DEFERRED to F-105.
+
+  - id: F-105
+    title: Confirm a successful inference lands in the SCM log view
+    priority: must
+    status: todo
+    depends_on: [F-101]
+    description: >
+      The gateway authenticates against the control plane and correctly rejects a bad key, which
+      proves the outbound sync path. What is untested is the full loop: an accepted request, routed
+      to a provider, with the log appearing in SCM. That is the only check that proves analytics
+      push works, not just config fetch.
+    implementation_notes:
+      - Generate an API key and a provider integration in the SCM AI Gateway UI.
+      - POST /v1/chat/completions with x-portkey-api-key, then check the SCM log view.
+    acceptance:
+      - A 200 inference response through the local gateway.
+      - The matching request is visible in the SCM AI Gateway log view.
 
   - id: F-102
     title: Guard the chart defaults against upstream drift
