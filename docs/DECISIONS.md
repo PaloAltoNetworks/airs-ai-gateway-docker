@@ -39,19 +39,47 @@ upstream deploy we do not control.
 Revisit if PANW publishes a gateway-registration endpoint; the change is contained to
 `do_from_values` and would reduce the CLI to two prompts.
 
-**Update 2026-08-12 — the `deployments` route is live.** `GET /ai_gw/admin/v2/deployments?organisation_id=<tsg>`
-returns 200 with the deployment list: `id`, `name`, `slug`, `type`, `status`, `is_default`,
-`last_synced_at`, and `connection_status` (`healthy` / `unknown`). Observed with a superuser SCM
-bearer token on the lab TSG.
+**Update 2026-08-12 — `POST /deployments` issues the credentials.** The premise above was wrong on
+one point: registration *is* reachable over the API.
 
-That is a genuine opening, but it does not by itself replace `values.yaml`: the response carries no
-`PORTKEY_CLIENT_AUTH` and no registry credentials, which are the two things the installer actually
-needs. Whether a sibling route issues them (`deployments/{id}/credentials` or similar) is untested.
+```
+POST /ai_gw/admin/v2/deployments
+{"name":"...","type":"production","organisation_id":"<tsg>",
+ "auth_settings":{"allow_all_workspaces":true}}
 
-What it *does* unlock today is verification: `--validate` currently probes `/v1/health` locally,
-which cannot see whether SCM considers the gateway connected. `connection_status` is the
-authoritative answer. Tracked as F-107, kept opt-in and non-fatal — the route remains outside the
-supported contract, so the install path must never depend on it.
+-> {"id":"...","client_auth":"client-auth-...",
+    "credentials":{"username":"<tsg>","password":"..."},
+    "organisation_id":"<org-uuid>","object":"deployment"}
+```
+
+That is every field the installer needs. `GET /deployments?organisation_id=<tsg>` also returns 200
+and lists deployments with `connection_status` and `last_synced_at`, but carries no credentials —
+the secrets exist only in the POST response, which is why the SCM console says "Save these values
+now. They won't be available later."
+
+Verified with the lab service account (client_credentials, `scope=tsg_id:<TSG>`), so this is not a
+console-session-only route.
+
+Comparing two deployments in the same tenant shows what is scoped where:
+
+| Field | Scope |
+|---|---|
+| `credentials.username` (= TSG ID) | Organisation — identical across deployments |
+| `credentials.password` | Organisation — identical across deployments |
+| `organisation_id` | Organisation |
+| `client_auth` | **Per deployment** — newly minted on each POST, never retrievable again |
+
+**The decision stands, but for a different reason.** `values.yaml` remains the default input:
+
+- The route is still outside the supported HTTP contract. Building the only path on it means the
+  installer breaks on an upstream deploy nobody warns us about.
+- `POST` is not idempotent. It mints a new deployment and a new `client_auth` on every call. An
+  installer that registers implicitly — on a re-run, a retry, a CI job — litters the tenant with
+  phantom deployments whose tokens are lost the moment the response scrolls past.
+
+So registration becomes an explicit opt-in verb (`--register`, tracked as F-108) that a human runs
+once, deliberately, and never a fallback the install path reaches on its own. `--from-values` stays
+the documented default.
 
 ## ADR-003 — Scope is gateway + Redis
 

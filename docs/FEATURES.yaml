@@ -105,7 +105,8 @@ features:
       considers the gateway connected. Those diverged during F-101 testing: health was green while
       the gateway could not reach the control plane at all.
       GET /ai_gw/admin/v2/deployments?organisation_id=<tsg> returns connection_status per deployment
-      (healthy / unknown) plus last_synced_at. Verified live 2026-08-12 on the lab TSG.
+      (healthy / unknown) plus last_synced_at. Verified live 2026-08-12 on the lab TSG with a
+      service account, so it does not need a console session.
     implementation_notes:
       - Needs an SCM bearer token - OAuth2 client_credentials against
         auth.apps.paloaltonetworks.com/oauth2/access_token with scope tsg_id:<TSG>. The Red Teaming
@@ -113,10 +114,40 @@ features:
       - Strictly opt-in (--check-scm or explicit credentials in .env) and never fatal. The route is
         outside the supported HTTP contract (ADR-002); the install path must not depend on it.
       - Match the local deployment by slug or name, and surface last_synced_at.
+      - GET only. Never let this path issue a POST - see F-108.
     acceptance:
       - With credentials, --validate reports the SCM-side connection_status.
       - Without credentials, --validate behaves exactly as today.
       - A 403 or a schema change degrades to a warning, never a failed install.
+
+  - id: F-108
+    title: Register a gateway from client_id + client_secret (--register)
+    priority: should
+    status: todo
+    depends_on: [F-107]
+    description: >
+      POST /ai_gw/admin/v2/deployments returns client_auth plus registry credentials, i.e. the whole
+      values.yaml payload. Verified 2026-08-12 with the lab service account. This closes the gap
+      with the Red Teaming installer, where the operator supplies only a client_id and secret.
+      It stays opt-in and separate from install - see ADR-002 for why.
+    implementation_notes:
+      - "Request: POST /deployments {name, type: production|non_production, organisation_id: <tsg>,
+        auth_settings: {allow_all_workspaces: bool}}."
+      - "Response: {id, client_auth, credentials:{username,password}, organisation_id}. The
+        username is the TSG ID; username, password and organisation_id are org-scoped and identical
+        across deployments. client_auth is per-deployment and minted fresh on every POST."
+      - CRITICAL - the POST is not idempotent and client_auth is never retrievable again. Never
+        reach it as a fallback from the install path, never on a retry. Explicit verb only.
+      - Check for an existing deployment of the same name first (GET) and refuse rather than
+        silently creating a duplicate; require --force to proceed anyway.
+      - Write the credentials straight to .env with the existing umask 077 + env_quote path, and
+        print nothing but the deployment name and id.
+      - Warn plainly that the route is unsanctioned and may break without notice.
+    acceptance:
+      - --register NAME creates a deployment and writes a working .env.
+      - Re-running with the same name refuses instead of creating a duplicate.
+      - No secret is printed to stdout or deploy.log.
+      - Nothing on the default install path can trigger a POST.
 
   - id: F-102
     title: Guard the chart defaults against upstream drift
