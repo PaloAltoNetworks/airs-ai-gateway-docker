@@ -39,13 +39,10 @@ Static-credential equivalents work fine. Details in the [Reference](docs/referen
 
 ## Why values.yaml and not just a Client ID
 
-The sibling [Red Teaming installer](https://github.com/PaloAltoNetworks/ai-redteam-network-client-docker)
-takes only a Client ID and Secret because the SASE API exposes endpoints to fetch the rest.
-
-The AI Gateway has an equivalent — `POST /ai_gw/admin/v2/deployments` returns the registration token
-and registry credentials — but it is outside the supported HTTP contract, and the call is not
-idempotent: every POST mints a new deployment and a new token that is never retrievable again. An
-installer that registered implicitly would litter your tenant on every retry.
+An API does exist — `POST /ai_gw/admin/v2/deployments` returns the registration token and registry
+credentials — but it sits outside the supported HTTP contract, and the call is not idempotent: every
+POST mints a new deployment and a new token that is never retrievable again. An installer that
+registered implicitly would litter your tenant on every retry.
 
 So `--from-values` is the default, and API registration will land as an explicit `--register` verb
 you run once on purpose (see `docs/DECISIONS.md` ADR-002).

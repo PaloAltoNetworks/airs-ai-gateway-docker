@@ -19,9 +19,9 @@ direction.
 
 **Status:** accepted
 
-The sibling Red Teaming installer bootstraps from a service-account Client ID and Secret because the
-SASE API exposes `/v1/registry-credentials` and `/v1/channels`. The AI Gateway has no published
-equivalent:
+Bootstrapping from nothing but a service-account Client ID and Secret would be the better experience,
+and other PANW products do exactly that where the SASE API exposes the necessary endpoints. The AI
+Gateway has no published equivalent:
 
 - No AI Gateway OpenAPI spec on pan.dev, and none planned.
 - The admin API behind the SCM console (`api.apps.paloaltonetworks.com/ai_gw/admin/v2/`) is outside
@@ -129,7 +129,7 @@ otherwise omitting it. `restart: unless-stopped` covers crash recovery either wa
 
 Verified on gateway `2.15.0`: the image ships **`wget`, not `curl`** (also `nc` and `node`), so the
 wget variant is what actually runs. Detection is still worth keeping — the base image is upstream's
-to change, exactly as the Red Teaming client did when it moved from distroless to busybox.
+to change, and a switch to a distroless base would silently remove the client.
 
 **Caveat, learned the hard way:** `--validate` probes `/v1/health` from the host, which only proves
 the process is listening. It says nothing about whether the *container* can reach the control plane.
