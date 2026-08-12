@@ -130,8 +130,8 @@ features:
       service account, so it does not need a console session.
     implementation_notes:
       - Needs an SCM bearer token - OAuth2 client_credentials against
-        auth.apps.paloaltonetworks.com/oauth2/access_token with scope tsg_id:<TSG>. The Red Teaming
-        installer's api_authenticate is liftable.
+        auth.apps.paloaltonetworks.com/oauth2/access_token with scope tsg_id:<TSG>, Basic auth on
+        the client_id/secret pair.
       - Strictly opt-in (--check-scm or explicit credentials in .env) and never fatal. The route is
         outside the supported HTTP contract (ADR-002); the install path must not depend on it.
       - Match the local deployment by slug or name, and surface last_synced_at.
@@ -148,8 +148,8 @@ features:
     depends_on: [F-107]
     description: >
       POST /ai_gw/admin/v2/deployments returns client_auth plus registry credentials, i.e. the whole
-      values.yaml payload. Verified 2026-08-12 with the lab service account. This closes the gap
-      with the Red Teaming installer, where the operator supplies only a client_id and secret.
+      values.yaml payload. Verified 2026-08-12 with the lab service account. It would let an operator
+      supply nothing but a client_id and secret, with no portal download at all.
       It stays opt-in and separate from install - see ADR-002 for why.
     implementation_notes:
       - "Request: POST /deployments {name, type: production|non_production, organisation_id: <tsg>,
