@@ -26,7 +26,7 @@ set -euo pipefail
 
 # --- Constants ---
 
-SCRIPT_VERSION="0.1.0"
+SCRIPT_VERSION="0.1.1"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 RUNTIME_ENV_FILE="${SCRIPT_DIR}/.env.runtime"
@@ -46,8 +46,9 @@ REDIS_SERVICE="airs-gw-redis"
 # These are NOT present in the values.yaml downloaded from SCM. Omitting them
 # leaves the gateway unable to reach its control plane, so they are reproduced
 # here and applied underneath whatever the customer file supplies.
+# Mirrors chart airs-gw-1.2.0. Re-diff _helpers.tpl before moving the tag.
 DEFAULT_GATEWAY_IMAGE_REPO="registry.portkey.ai/airsgw/gateway_enterprise"
-DEFAULT_GATEWAY_IMAGE_TAG="2.15.0"
+DEFAULT_GATEWAY_IMAGE_TAG="2.21.0"
 DEFAULT_REDIS_IMAGE="docker.io/redis:7.2-alpine"
 MIN_GATEWAY_VERSION="2.15.0"
 
@@ -227,7 +228,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --version)
-      [ $# -ge 2 ] || die "--version requires a tag (e.g. 2.15.0)"
+      [ $# -ge 2 ] || die "--version requires a tag (e.g. 2.21.0)"
       PIN_TAG="$2"
       shift 2
       ;;
