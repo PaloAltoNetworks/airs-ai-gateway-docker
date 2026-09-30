@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installed, so the same file parses identically on every host.
 - The healthcheck client is detected with one container run instead of two.
 
+### Fixed
+
+- `--version TAG` is now recorded in `.env`. It used to apply to that run only, so the next plain
+  re-run silently rolled the gateway back to the stored tag.
+
 ### Removed
 
 - The undocumented `--from-values=FILE` and `--version=TAG` forms. Use `--from-values FILE` and

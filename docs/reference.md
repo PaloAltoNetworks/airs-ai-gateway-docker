@@ -353,6 +353,9 @@ changed:
 ./setup-panw-ai-gateway.sh --force-pull        # same tag, repushed
 ```
 
+`--version` is recorded as `GATEWAY_IMAGE_TAG` in `.env` once the pull succeeds, so later plain
+re-runs stay on it.
+
 Minimum supported gateway version is `2.15.0`; the installer warns below that.
 
 ### Uninstall

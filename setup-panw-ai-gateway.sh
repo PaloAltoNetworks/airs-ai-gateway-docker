@@ -290,6 +290,23 @@ emit_env() {
   printf '%s=%s\n' "$key" "$(env_quote "$value")"
 }
 
+# Record a --version pin in .env so the next plain re-run keeps it instead of
+# silently rolling back. Replaces the GATEWAY_IMAGE_TAG line in place, or
+# appends one. ENVIRON, not -v, so awk does not reinterpret backslashes.
+persist_image_tag() {
+  local tmp="${ENV_FILE}.tmp"
+  (
+    umask 077
+    TAG_LINE="$(emit_env GATEWAY_IMAGE_TAG "$GATEWAY_IMAGE_TAG")" awk '
+      /^GATEWAY_IMAGE_TAG=/ { print ENVIRON["TAG_LINE"]; done = 1; next }
+      { print }
+      END { if (!done) print ENVIRON["TAG_LINE"] }
+    ' "$ENV_FILE" >"$tmp"
+  )
+  mv "$tmp" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+}
+
 # --- Detect docker compose command ---
 
 detect_compose() {
@@ -947,6 +964,13 @@ do_install() {
   [ -z "$image_digest" ] && image_digest="unknown"
   info "Image digest: $image_digest"
   log_deploy "image_pulled" "image=$full_image digest=$image_digest"
+
+  # Only after a successful pull, so a bad tag is never recorded, and before
+  # the early exit, so pinning the tag that is already running still sticks.
+  if [ -n "$PIN_TAG" ]; then
+    persist_image_tag
+    info "Pinned GATEWAY_IMAGE_TAG=$GATEWAY_IMAGE_TAG in .env."
+  fi
 
   # Nothing to do when the same digest is already serving.
   if [ "$FORCE_PULL" != true ] && [ "$image_digest" != "unknown" ] && [ -f "$DIGEST_FILE" ]; then
