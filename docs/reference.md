@@ -25,7 +25,7 @@ Full configuration, operations, and migration guide for the Prisma AIRS AI Gatew
 |---|---|
 | **Docker** | 20.10+, with Docker Compose (v1 or v2) |
 | **OS** | Linux (x86_64, aarch64) or macOS (Intel, Apple Silicon) |
-| **Tools** | `curl` required; `yq` optional (used for exact YAML parsing when present) |
+| **Tools** | `curl` |
 | **Network** | Outbound HTTPS — see [Egress](#egress-requirements) |
 | **Input** | `values.yaml` from SCM → AI Gateway → Gateway Registration |
 

@@ -46,7 +46,7 @@ is empty.
 | Reproduce all six chart workloads | Milvus and etcd are cluster-shaped; a single-host copy invites a deployment nobody should run in production. ADR-003. |
 | Ship a `docker run` snippet in docs | Pushes the eight-variable merge onto the user by hand — exactly the failure this removes. |
 | Rewrite the installer in Go/Rust | Heavier toolchain and release pipeline for a thin orchestration layer. |
-| Require `yq` | Breaks the portability promise on hosts where installing it needs a change ticket. ADR-004. |
+| Require `yq` | Breaks the portability promise on hosts where installing it needs a change ticket. |
 
 ## 5. Users
 
@@ -103,7 +103,7 @@ Priority key: **P0** core install path; **P1** important; **P2** convenience.
 - **Fidelity.** The generated environment must match `helm template` for the default topology. The
   eight inherited defaults are the specific regression risk (ADR-006).
 - **Portability.** Linux (x86_64, aarch64) and macOS; bash 3.2 compatible; `curl` the only hard
-  dependency; `yq` optional.
+  dependency.
 - **Robustness.** `set -euo pipefail`; guarded command substitutions so a no-match `grep` cannot
   abort a run; `die()` for fatal errors.
 - **Auditability.** Every install and pull appended to `deploy.log` with timestamp and digest, no
