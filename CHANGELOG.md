@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `values.yaml` is always read by the built-in `awk` reader. `yq` is no longer used even when
   installed, so the same file parses identically on every host.
+- The healthcheck client is detected with one container run instead of two.
 
 ### Removed
 

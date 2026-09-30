@@ -96,14 +96,6 @@ CORE_ENV_KEYS=(
   ALBUS_BASEPATH CONTROL_PLANE_BASEPATH MCP_GATEWAY_BASE_URL
 )
 
-# Keys whose values must never be printed or logged.
-SECRET_KEYS=(
-  PORTKEY_CLIENT_AUTH REGISTRY_PASSWORD REDIS_PASSWORD
-  LOG_STORE_ACCESS_KEY LOG_STORE_SECRET_KEY ANALYTICS_STORE_PASSWORD
-  AZURE_STORAGE_KEY AZURE_ENTRA_CLIENT_SECRET AZURE_REDIS_ENTRA_CLIENT_SECRET
-  REDIS_CLUSTER_DISCOVERY_AUTH
-)
-
 # Outbound endpoints the data plane needs (docs/OutboundAPIs.md upstream).
 EGRESS_HOSTS=(
   "mp.us.prod.airs-gw.portkey.ai|Management plane (config sync)"
@@ -148,9 +140,6 @@ die() {
   error "$1"
   exit 1
 }
-# Debug output to stderr, gated on DEBUG. Never pass secrets as args — callers
-# must redact tokens/passwords before calling.
-debug() { [ "${DEBUG:-false}" = true ] && printf "${YELLOW}[DEBUG]${NC} %s\n" "$1" >&2 || true; }
 step() { [ "$QUIET" = true ] || printf "\n${BOLD}--- Step %s: %s ---${NC}\n" "$1" "$2"; }
 
 # Probe a URL, echo the HTTP status code (or "000" when unreachable).
@@ -169,14 +158,6 @@ log_deploy() {
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   printf "[%s] user=%s action=%s %s\n" "$ts" "$(whoami)" "$1" "${2:-}" >>"$DEPLOY_LOG"
   chmod 600 "$DEPLOY_LOG" 2>/dev/null || true
-}
-
-is_secret_key() {
-  local candidate="$1" k
-  for k in "${SECRET_KEYS[@]}"; do
-    [ "$k" = "$candidate" ] && return 0
-  done
-  return 1
 }
 
 # --- Usage ---
@@ -322,13 +303,7 @@ detect_compose() {
 }
 
 require_basics() {
-  local missing=()
-  command -v curl &>/dev/null || missing+=("curl")
-  if [ ${#missing[@]} -gt 0 ]; then
-    error "Missing required dependencies: ${missing[*]}"
-    error "Install them and re-run."
-    exit 1
-  fi
+  command -v curl &>/dev/null || die "Missing required dependency: curl. Install it and re-run."
 }
 
 validate_uuid() {
@@ -337,11 +312,7 @@ validate_uuid() {
 
 # Compare dotted versions: returns 0 when $1 >= $2.
 version_ge() {
-  local a="$1" b="$2"
-  [ "$a" = "$b" ] && return 0
-  local highest
-  highest=$(printf '%s\n%s\n' "$a" "$b" | sort -V | tail -1)
-  [ "$highest" = "$a" ]
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
 
 # =============================================================================
@@ -366,11 +337,10 @@ values_get() {
       return s
     }
     BEGIN {
-      # ".a.b[0].c" -> want[1]="a" want[2]="b" want[3]="c"
-      p = path
-      sub(/^\./, "", p)
-      gsub(/\[0\]/, "", p)
-      n = split(p, want, ".")
+      # ".a.b[0].c" -> "a.b.c"
+      target = path
+      sub(/^\./, "", target)
+      gsub(/\[0\]/, "", target)
     }
     # Track indentation-based context. A list item ("- key: value") opens a new
     # level; only the first item is ever consulted, which matches [0].
@@ -393,9 +363,6 @@ values_get() {
       val = body
       sub(/^[^:]*:[ \t]*/, "", val)
 
-      # A list item resets the sibling context at its own indent.
-      if (isitem) { for (i = indent; i <= 200; i++) delete ctx[i] }
-
       while (depth > 0 && stack[depth] >= indent) { delete ctx[stack[depth]]; depth-- }
 
       ctx[indent] = key
@@ -408,9 +375,6 @@ values_get() {
         cur = (cur == "" ? ctx[stack[i]] : cur "." ctx[stack[i]])
       }
 
-      target = want[1]
-      for (i = 2; i <= n; i++) target = target "." want[i]
-
       if (cur == target && val != "") { print strip(val); exit }
     }
   ' "$file"
@@ -421,7 +385,7 @@ values_env_keys() {
   local file="$1"
   awk '
     /^[ \t]*#/ { next }
-    /^[ \t]*environment[ \t]*:/ { in_env = 1; env_indent = index($0, "e") - 1; next }
+    /^[ \t]*environment[ \t]*:/ { in_env = 1; next }
     in_env && /^[ \t]*data[ \t]*:/ { in_data = 1; data_indent = index($0, "d") - 1; next }
     in_data {
       if ($0 ~ /^[ \t]*$/) next
@@ -466,7 +430,8 @@ do_from_values() {
   # defaults first, then the customer file on top. This mirrors how Helm
   # deep-merges environment.data over the chart's values, and keeps us on
   # bash 3.2 (macOS) which has no associative arrays.
-  # RESOLVED_KEYS records insertion order so the writer can emit them all.
+  # RESOLVED_KEYS records every key so the writer can emit them all; the writer
+  # sorts and dedupes.
   RESOLVED_KEYS=""
   local pair key value
   for pair in "${CHART_ENV_DEFAULTS[@]}"; do
@@ -485,10 +450,7 @@ do_from_values() {
     value=$(values_get "$file" ".environment.data.${key}")
     [ -n "$value" ] || continue
     export "$key=$value"
-    case " $RESOLVED_KEYS " in
-      *" $key "*) ;;
-      *) RESOLVED_KEYS="${RESOLVED_KEYS}${key} " ;;
-    esac
+    RESOLVED_KEYS="${RESOLVED_KEYS}${key} "
   done < <(values_env_keys "$file")
 
   # Mirrors the chart's own airsgateway.validateRequiredEnv fail-fast.
@@ -559,7 +521,7 @@ do_from_values() {
       printf '\n# --- Gateway environment (chart defaults + values.yaml overrides) ---\n'
       # Intentionally unquoted: RESOLVED_KEYS is a space-separated key list.
       # shellcheck disable=SC2086
-      for key in $(printf '%s\n' $RESOLVED_KEYS | tr ' ' '\n' | sort -u); do
+      for key in $(printf '%s\n' $RESOLVED_KEYS | sort -u); do
         emit_env "$key" "${!key:-}"
       done
 
@@ -578,15 +540,10 @@ do_from_values() {
 # =============================================================================
 
 # True when the operator pointed the gateway at a Redis we do not run.
+# An explicit REDIS_URL that is not our own service also counts.
 uses_external_redis() {
-  local store="${CACHE_STORE:-redis}"
-  [ -n "${REDIS_URL:-}" ] && [ "$store" != "redis" ] && return 0
-  [ "$store" != "redis" ] && return 0
-  # An explicit REDIS_URL that is not our own service also counts.
-  if [ -n "${REDIS_URL:-}" ] && [[ "${REDIS_URL}" != *"${REDIS_SERVICE}"* ]]; then
-    return 0
-  fi
-  return 1
+  [ "${CACHE_STORE:-redis}" != "redis" ] ||
+    [[ -n "${REDIS_URL:-}" && "$REDIS_URL" != *"$REDIS_SERVICE"* ]]
 }
 
 # Emit the runtime env file consumed by the gateway container.
@@ -644,14 +601,9 @@ write_runtime_env() {
 # The chart probes /v1/health over HTTP, but the image may be distroless with no
 # HTTP client. Probe once and degrade gracefully (docs/DECISIONS.md ADR-005).
 detect_health_client() {
-  local image="$1"
-  if docker run --rm --entrypoint sh "$image" -c 'command -v curl' &>/dev/null; then
-    printf 'curl'
-  elif docker run --rm --entrypoint sh "$image" -c 'command -v wget' &>/dev/null; then
-    printf 'wget'
-  else
-    printf ''
-  fi
+  docker run --rm --entrypoint sh "$1" -c \
+    'for c in curl wget; do command -v "$c" >/dev/null && { printf %s "$c"; exit; }; done' \
+    2>/dev/null || true
 }
 
 # Resolve the uid:gid the redis image expects to run as. Hardcoding it would
@@ -672,16 +624,17 @@ write_compose() {
 
   [ -f "$COMPOSE_FILE" ] && cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak"
 
-  local port="${PORT:-8787}"
-  local mcp_port="${MCP_PORT:-8788}"
+  # PORT, MCP_PORT, SERVER_MODE and REDIS_IMAGE are defaulted by do_install.
+  local port="$PORT"
+  local mcp_port="$MCP_PORT"
   local host_port="${HOST_PORT:-$port}"
   local host_mcp_port="${HOST_MCP_PORT:-$mcp_port}"
-  local server_mode="${SERVER_MODE:-all}"
+  local server_mode="$SERVER_MODE"
   local mem_limit="${GATEWAY_MEM_LIMIT:-2g}"
   local cpus="${GATEWAY_CPUS:-2.0}"
 
   local REDIS_UID=""
-  [ "$external_redis" != true ] && REDIS_UID="$(detect_redis_uid "${REDIS_IMAGE:-$DEFAULT_REDIS_IMAGE}")"
+  [ "$external_redis" != true ] && REDIS_UID="$(detect_redis_uid "$REDIS_IMAGE")"
 
   {
     printf 'services:\n'
@@ -689,7 +642,7 @@ write_compose() {
     if [ "$external_redis" != true ]; then
       cat <<EOF
   ${REDIS_SERVICE}:
-    image: "${REDIS_IMAGE:-$DEFAULT_REDIS_IMAGE}"
+    image: "${REDIS_IMAGE}"
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     volumes:
@@ -767,28 +720,21 @@ EOF
     local probe_port="$port"
     [ "$server_mode" = "mcp" ] && probe_port="$mcp_port"
 
+    local health_cmd=""
     case "$health_client" in
-      curl)
-        cat <<EOF
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${probe_port}/v1/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-EOF
-        ;;
-      wget)
-        cat <<EOF
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${probe_port}/v1/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-EOF
-        ;;
+      curl) health_cmd='"curl", "-fsS"' ;;
+      wget) health_cmd='"wget", "-qO-"' ;;
     esac
+    if [ -n "$health_cmd" ]; then
+      cat <<EOF
+    healthcheck:
+      test: ["CMD", ${health_cmd}, "http://127.0.0.1:${probe_port}/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+EOF
+    fi
 
     if [ "$external_redis" != true ]; then
       printf '\nvolumes:\n  airs-gw-redis-data:\n'
@@ -801,7 +747,6 @@ EOF
 # =============================================================================
 
 preflight() {
-  local label="$1"
   info "Running preflight checks..."
   info "Script version: $SCRIPT_VERSION"
 
@@ -839,19 +784,17 @@ preflight() {
     success "Docker Compose $compose_ver ($compose)"
   fi
 
-  if [ "$label" = "install" ]; then
-    local entry host desc code
-    for entry in "${EGRESS_HOSTS[@]}"; do
-      host="${entry%%|*}"
-      desc="${entry#*|}"
-      code=$(http_probe "https://${host}")
-      if [ "$code" != "000" ]; then
-        success "Egress: $host reachable (HTTP $code) — $desc"
-      else
-        warn "Cannot reach $host — $desc. Check network/firewall."
-      fi
-    done
-  fi
+  local entry host desc code
+  for entry in "${EGRESS_HOSTS[@]}"; do
+    host="${entry%%|*}"
+    desc="${entry#*|}"
+    code=$(http_probe "https://${host}")
+    if [ "$code" != "000" ]; then
+      success "Egress: $host reachable (HTTP $code) — $desc"
+    else
+      warn "Cannot reach $host — $desc. Check network/firewall."
+    fi
+  done
 
   if [ "$failed" = true ]; then
     if [ "$DRY_RUN" = true ]; then
@@ -895,7 +838,7 @@ do_install() {
   fi
 
   step "3" "Preflight checks"
-  preflight "install"
+  preflight
 
   local var
   for var in REGISTRY_HOST REGISTRY_USERNAME REGISTRY_PASSWORD PORTKEY_CLIENT_AUTH ORGANISATIONS_TO_SYNC; do
@@ -949,7 +892,8 @@ do_install() {
     info "Resolved gateway environment:"
     for key in "${CORE_ENV_KEYS[@]}"; do
       [ -n "${!key:-}" ] || continue
-      if is_secret_key "$key"; then
+      # PORTKEY_CLIENT_AUTH is the only secret among CORE_ENV_KEYS.
+      if [ "$key" = PORTKEY_CLIENT_AUTH ]; then
         printf '    %s=<redacted>\n' "$key"
       else
         printf '    %s=%s\n' "$key" "${!key}"
@@ -1045,9 +989,9 @@ do_install() {
 
   echo ""
   success "AI Gateway is up."
-  info "Gateway:  http://localhost:${HOST_PORT:-${PORT:-8787}}"
-  if [ "${SERVER_MODE:-all}" = "all" ] || [ "${SERVER_MODE:-all}" = "mcp" ]; then
-    info "MCP:      http://localhost:${HOST_MCP_PORT:-${MCP_PORT:-8788}}"
+  info "Gateway:  http://localhost:${HOST_PORT:-$PORT}"
+  if [ "$SERVER_MODE" = "all" ] || [ "$SERVER_MODE" = "mcp" ]; then
+    info "MCP:      http://localhost:${HOST_MCP_PORT:-$MCP_PORT}"
   fi
   info "Verify:   ./setup-panw-ai-gateway.sh --validate"
 }
@@ -1057,9 +1001,6 @@ do_install() {
 # =============================================================================
 
 do_status() {
-  [ -f "$ENV_FILE" ] || die ".env not found. Run --from-values <file> first."
-  load_env "$ENV_FILE"
-
   printf "${BOLD}AI Gateway deployment status${NC}\n\n"
 
   local compose_cmd
@@ -1091,9 +1032,6 @@ do_status() {
 # =============================================================================
 
 do_validate() {
-  [ -f "$ENV_FILE" ] || die ".env not found. Run --from-values <file> first."
-  load_env "$ENV_FILE"
-
   local port="${HOST_PORT:-${PORT:-8787}}"
   local url="http://localhost:${port}/v1/health"
   local failed=false
@@ -1145,9 +1083,6 @@ do_validate() {
 # =============================================================================
 
 do_diagnose() {
-  [ -f "$ENV_FILE" ] || die ".env not found. Run --from-values <file> first."
-  load_env "$ENV_FILE"
-
   local compose_cmd
   compose_cmd="$(detect_compose)"
   [ -n "$compose_cmd" ] || die "Docker Compose not found."
@@ -1226,6 +1161,12 @@ do_diagnose() {
 # =============================================================================
 
 require_basics
+
+# Every mode but install reads an existing .env.
+if [ "$MODE" != install ]; then
+  [ -f "$ENV_FILE" ] || die ".env not found. Run --from-values <file> first."
+  load_env "$ENV_FILE"
+fi
 
 case "$MODE" in
   install) do_install ;;

@@ -89,7 +89,8 @@ Bundled by default, matching the chart. When the operator sets `CACHE_STORE` to 
 - The registry password reaches `docker login` via `--password-stdin`, never argv, so it is
   invisible in `ps`.
 - Credential-handling paths disable shell tracing (`set +x`).
-- `--dry-run` redacts everything in `SECRET_KEYS` before printing.
+- `--dry-run` prints only `CORE_ENV_KEYS` and redacts `PORTKEY_CLIENT_AUTH`, the one secret among
+  them. Widening what it prints means widening the redaction too.
 - `deploy.log` records image digests and timestamps, never secrets.
 - Keys read from `values.yaml` are validated against `^[A-Za-z_][A-Za-z0-9_]*$` before export, so a
   malformed file cannot inject `PATH` or `LD_PRELOAD`.
