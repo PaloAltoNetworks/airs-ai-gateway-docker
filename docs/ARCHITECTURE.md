@@ -97,7 +97,10 @@ Bundled by default, matching the chart. When the operator sets `CACHE_STORE` to 
 
 ## CI / release
 
-- Lint workflow: ShellCheck + shfmt (2-space) on push and PR.
+- Lint workflow: ShellCheck + shfmt (2-space) on push and PR, plus `tests/*.sh` across bash
+  3.2 / 4.4 / 5.2 (busybox), Debian (mawk), Ubuntu (GNU), macOS `/bin/bash` 3.2 (BSD) and Windows
+  Git Bash.
+- `.gitattributes` forces LF so a Windows checkout does not hand bash CRLF scripts.
 - Release workflow on tag push: attaches the `.sh` plus a Sigstore build-provenance attestation,
   body is changelog-only.
 - All GitHub Actions SHA-pinned (org rule).
