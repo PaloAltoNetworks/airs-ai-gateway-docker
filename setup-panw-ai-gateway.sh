@@ -565,11 +565,8 @@ uses_external_redis() {
 
 # Emit the runtime env file consumed by the gateway container.
 write_runtime_env() {
-  local external_redis="$1"
+  local external_redis="$1" out="$2"
   local key
-
-  [ -f "$RUNTIME_ENV_FILE" ] && cp "$RUNTIME_ENV_FILE" "${RUNTIME_ENV_FILE}.bak" &&
-    chmod 600 "${RUNTIME_ENV_FILE}.bak"
 
   (
     umask 077
@@ -609,9 +606,9 @@ write_runtime_env() {
       if [ "${INSECURE_SKIP_TLS_VERIFY:-false}" = "true" ]; then
         emit_env NODE_TLS_REJECT_UNAUTHORIZED "0"
       fi
-    } >"$RUNTIME_ENV_FILE"
+    } >"$out"
   )
-  chmod 600 "$RUNTIME_ENV_FILE"
+  chmod 600 "$out"
 }
 
 # Decide whether the pulled image can run an in-container healthcheck.
@@ -637,9 +634,7 @@ detect_redis_uid() {
 }
 
 write_compose() {
-  local image="$1" external_redis="$2" health_client="$3"
-
-  [ -f "$COMPOSE_FILE" ] && cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak"
+  local image="$1" external_redis="$2" health_client="$3" out="$4"
 
   # PORT, MCP_PORT, SERVER_MODE and REDIS_IMAGE are defaulted by do_install.
   local port="$PORT"
@@ -756,7 +751,7 @@ EOF
     if [ "$external_redis" != true ]; then
       printf '\nvolumes:\n  airs-gw-redis-data:\n'
     fi
-  } >"$COMPOSE_FILE"
+  } >"$out"
 }
 
 # =============================================================================
@@ -831,6 +826,9 @@ preflight() {
 # =============================================================================
 
 do_install() {
+  # Rendered configs are staged as .new; never leave one behind on any exit.
+  trap 'rm -f "${RUNTIME_ENV_FILE}.new" "${COMPOSE_FILE}.new"' EXIT
+
   if [ "$QUIET" != true ]; then
     echo ""
     printf "${BOLD}=================================================${NC}\n"
@@ -917,11 +915,9 @@ do_install() {
       fi
     done
     echo ""
-    write_compose "$full_image" "$external_redis" ""
+    write_compose "$full_image" "$external_redis" "" "${COMPOSE_FILE}.new"
     info "Preview of docker-compose.yml:"
-    sed 's/^/    /' "$COMPOSE_FILE"
-    rm -f "$COMPOSE_FILE"
-    [ -f "${COMPOSE_FILE}.bak" ] && mv "${COMPOSE_FILE}.bak" "$COMPOSE_FILE"
+    sed 's/^/    /' "${COMPOSE_FILE}.new"
     echo ""
     info "No changes were made."
     exit 0
@@ -972,35 +968,36 @@ do_install() {
     info "Pinned GATEWAY_IMAGE_TAG=$GATEWAY_IMAGE_TAG in .env."
   fi
 
-  # Nothing to do when the same digest is already serving.
-  if [ "$FORCE_PULL" != true ] && [ "$image_digest" != "unknown" ] && [ -f "$DIGEST_FILE" ]; then
-    local prev_digest
-    prev_digest=$(cat "$DIGEST_FILE" 2>/dev/null || echo "")
-    if [ "$prev_digest" = "$image_digest" ] && [ -n "$compose_cmd" ] &&
-      $compose_cmd ps --format json 2>/dev/null | grep -q '"running"'; then
-      info "Already running this digest. Nothing to do."
-      info "If you changed .env, run: $compose_cmd up -d --force-recreate"
-      exit 0
-    fi
-  fi
-
   step "6" "Writing configuration"
 
-  write_runtime_env "$external_redis"
-  success ".env.runtime written (mode 600)."
-
-  local health_client
+  # Render into .new files first, so a run where only .env changed is still
+  # detected: the early exit below needs the digest AND both files unchanged.
+  local health_client compose_image="$full_image" f
   health_client="$(detect_health_client "$full_image")"
+  [ "$image_digest" != "unknown" ] && compose_image="${GATEWAY_IMAGE_REPO}@${image_digest}"
+  write_runtime_env "$external_redis" "${RUNTIME_ENV_FILE}.new"
+  write_compose "$compose_image" "$external_redis" "$health_client" "${COMPOSE_FILE}.new"
+
+  if [ "$FORCE_PULL" != true ] && [ "$image_digest" != "unknown" ] &&
+    [ "$(cat "$DIGEST_FILE" 2>/dev/null)" = "$image_digest" ] &&
+    cmp -s "${RUNTIME_ENV_FILE}.new" "$RUNTIME_ENV_FILE" &&
+    cmp -s "${COMPOSE_FILE}.new" "$COMPOSE_FILE" &&
+    [ -n "$compose_cmd" ] && $compose_cmd ps --format json 2>/dev/null | grep -q '"running"'; then
+    info "Already running this digest and configuration. Nothing to do."
+    exit 0
+  fi
+
+  for f in "$RUNTIME_ENV_FILE" "$COMPOSE_FILE"; do
+    [ -f "$f" ] && cp "$f" "${f}.bak" && chmod 600 "${f}.bak"
+    mv "${f}.new" "$f"
+  done
+  success ".env.runtime written (mode 600)."
   if [ -n "$health_client" ]; then
     success "Healthcheck enabled (/v1/health via $health_client)."
   else
     info "Image ships no HTTP client — container healthcheck omitted."
     info "Use --validate from the host instead; restart: unless-stopped covers crashes."
   fi
-
-  local compose_image="$full_image"
-  [ "$image_digest" != "unknown" ] && compose_image="${GATEWAY_IMAGE_REPO}@${image_digest}"
-  write_compose "$compose_image" "$external_redis" "$health_client"
   success "docker-compose.yml written."
 
   step "7" "Starting the stack"

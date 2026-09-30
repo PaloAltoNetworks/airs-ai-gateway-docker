@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--version TAG` is now recorded in `.env`. It used to apply to that run only, so the next plain
   re-run silently rolled the gateway back to the stored tag.
+- A re-run where only `.env` changed now applies the change. The early exit used to compare image
+  digests only, so the new setting was silently ignored until `--force-pull`. It now also requires
+  the generated `.env.runtime` and `docker-compose.yml` to be unchanged (F-109).
 
 ### Removed
 

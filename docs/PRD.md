@@ -25,7 +25,7 @@ is empty.
 - One command from a downloaded `values.yaml` to a running gateway.
 - Faithfully reproduce what `helm template` renders, including the defaults the chart hides.
 - Ship a hardened-by-default stack matching the chart's own security context.
-- Be safe to re-run: idempotent, exits early when the digest is unchanged.
+- Be safe to re-run: idempotent, exits early when the digest and generated config are unchanged.
 - Leave a credential-free audit trail for SOC 2 / ISO 27001.
 - Be explicit about what is out of scope, and point to Helm for it.
 
@@ -87,7 +87,8 @@ Priority key: **P0** core install path; **P1** important; **P2** convenience.
   `docker-compose.yml`, start the stack.
 - **FR3 — Redis topology (P0).** Bundled Redis by default; omitted entirely when the operator points
   `CACHE_STORE`/`REDIS_URL` at a managed cache.
-- **FR4 — Idempotent re-run (P1).** Unchanged digest with a running container exits early.
+- **FR4 — Idempotent re-run (P1).** Unchanged digest and generated config with a running container
+  exits early; a config-only change is re-applied.
 - **FR5 — Status / validate / diagnose.** `--status` (P1); `--validate` probes `/v1/health` plus
   control-plane reachability (P0 — how success is confirmed); `--diagnose` pattern-matches logs (P2).
 - **FR6 — Update (P1).** `--version TAG` pins; `--force-pull` re-pulls a repushed tag.
@@ -146,7 +147,7 @@ No telemetry ships, so these are measured out-of-band:
   prepared host.
 - **Config fidelity** — the resolved environment matches `helm template` for the default topology.
   Verifiable locally, and the one thing worth a CI check.
-- **Idempotent re-run** — unchanged digest exits early without restarting the container.
+- **Idempotent re-run** — unchanged digest and config exits early without restarting the container.
 - **Zero secret leakage** — nothing in `deploy.log`, `ps`, or committed files.
 
 ## 12. Risks and open items

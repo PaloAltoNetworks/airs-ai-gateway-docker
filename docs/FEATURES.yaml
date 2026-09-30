@@ -100,21 +100,23 @@ features:
   - id: F-109
     title: Re-apply config changes when only .env changed
     priority: should
-    status: todo
+    status: done
     depends_on: []
     description: >
-      The early-exit path compares image digests, so a run where only .env changed exits without
-      rewriting .env.runtime - the new setting silently does not apply. Found while testing F-106:
-      INSECURE_SKIP_TLS_VERIFY=true appeared to do nothing until --force-pull was used.
-      The installer already prints "If you changed .env, run ... --force-recreate", which puts the
-      burden on the operator noticing.
+      The early-exit path compared image digests only, so a run where only .env changed exited
+      without rewriting .env.runtime - the new setting silently did not apply. Found while testing
+      F-106: INSECURE_SKIP_TLS_VERIFY=true appeared to do nothing until --force-pull was used.
+      Fixed 2026-09-30, verified live on gateway 2.21.0.
     implementation_notes:
-      - Hash the resolved runtime environment and store it next to .image-digest; re-deploy when
-        either the digest or the config hash changes.
-      - Do not let the hash file leak secrets - hash the content, never store it.
+      - No hash file after all. .env.runtime and docker-compose.yml are rendered to .new files and
+        compared with cmp against the live ones; the early exit needs the digest AND both files
+        unchanged. Nothing new is stored, so nothing can leak, and cmp is POSIX (busybox, Git Bash)
+        where sha256sum vs shasum differs by platform.
+      - Cost - the early-exit path now runs the healthcheck and Redis uid detection, 1-2s.
+      - The .new files are removed by an EXIT trap, so no rendered secret is left behind.
     acceptance:
-      - Changing a value in .env and re-running applies it without --force-pull.
-      - An unchanged .env and unchanged digest still exits early without restarting.
+      - Changing a value in .env and re-running applies it without --force-pull. PASS
+      - An unchanged .env and unchanged digest still exits early without restarting. PASS
 
   - id: F-107
     title: Check SCM connection_status in --validate

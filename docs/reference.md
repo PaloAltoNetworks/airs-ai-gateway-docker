@@ -344,8 +344,9 @@ an inference request that shows up in the SCM AI Gateway log view.
 
 ### Updating
 
-Re-run the installer. It pulls the configured tag, compares digests, and exits early when nothing
-changed:
+Re-run the installer. It pulls the configured tag, compares the digest and the generated config, and
+exits early when nothing changed. Edits to `.env` are picked up on the next run, no `--force-pull`
+needed:
 
 ```bash
 ./setup-panw-ai-gateway.sh                     # current tag
