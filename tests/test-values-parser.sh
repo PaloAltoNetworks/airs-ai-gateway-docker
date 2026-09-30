@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Exercises the values.yaml reader against the redacted fixture, on both the
-# yq fast path and the built-in awk fallback, and asserts they agree.
+# Exercises the values.yaml reader against the redacted fixture, and the
+# env_quote/load_env round-trip against shell metacharacters.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,10 +17,12 @@ extract_fn() {
   ' "$INSTALLER"
 }
 
-eval "$(extract_fn values_get_awk)"
+eval "$(extract_fn values_get)"
 eval "$(extract_fn values_env_keys)"
 eval "$(extract_fn env_quote)"
 eval "$(extract_fn load_env)"
+eval "$(extract_fn emit_env)"
+eval "$(extract_fn persist_image_tag)"
 
 PASS=0
 FAIL=0
@@ -36,44 +38,22 @@ check() {
   fi
 }
 
-echo "== awk fallback reader =="
-check "imageCredentials[0].registry" "$(values_get_awk "$FIXTURE" '.imageCredentials[0].registry')" "https://registry.portkey.ai"
-check "imageCredentials[0].username" "$(values_get_awk "$FIXTURE" '.imageCredentials[0].username')" "1234567890"
-check "imageCredentials[0].password" "$(values_get_awk "$FIXTURE" '.imageCredentials[0].password')" "00000000-0000-0000-0000-000000000000"
-check "environment.data.PORTKEY_CLIENT_AUTH" "$(values_get_awk "$FIXTURE" '.environment.data.PORTKEY_CLIENT_AUTH')" "client-auth-REDACTEDREDACTEDREDACTEDREDACTED"
-check "environment.data.ORGANISATIONS_TO_SYNC" "$(values_get_awk "$FIXTURE" '.environment.data.ORGANISATIONS_TO_SYNC')" "11111111-2222-3333-4444-555555555555"
-check "environment.data.PORT" "$(values_get_awk "$FIXTURE" '.environment.data.PORT')" "8787"
-check "service.port" "$(values_get_awk "$FIXTURE" '.service.port')" "80"
-check "service.containerPort" "$(values_get_awk "$FIXTURE" '.service.containerPort')" "8787"
-check "service.type" "$(values_get_awk "$FIXTURE" '.service.type')" "LoadBalancer"
-check "absent key returns empty" "$(values_get_awk "$FIXTURE" '.environment.data.NOPE')" ""
+echo "== values.yaml reader =="
+check "imageCredentials[0].registry" "$(values_get "$FIXTURE" '.imageCredentials[0].registry')" "https://registry.portkey.ai"
+check "imageCredentials[0].username" "$(values_get "$FIXTURE" '.imageCredentials[0].username')" "1234567890"
+check "imageCredentials[0].password" "$(values_get "$FIXTURE" '.imageCredentials[0].password')" "00000000-0000-0000-0000-000000000000"
+check "environment.data.PORTKEY_CLIENT_AUTH" "$(values_get "$FIXTURE" '.environment.data.PORTKEY_CLIENT_AUTH')" "client-auth-REDACTEDREDACTEDREDACTEDREDACTED"
+check "environment.data.ORGANISATIONS_TO_SYNC" "$(values_get "$FIXTURE" '.environment.data.ORGANISATIONS_TO_SYNC')" "11111111-2222-3333-4444-555555555555"
+check "environment.data.PORT" "$(values_get "$FIXTURE" '.environment.data.PORT')" "8787"
+check "service.port" "$(values_get "$FIXTURE" '.service.port')" "80"
+check "service.containerPort" "$(values_get "$FIXTURE" '.service.containerPort')" "8787"
+check "service.type" "$(values_get "$FIXTURE" '.service.type')" "LoadBalancer"
+check "absent key returns empty" "$(values_get "$FIXTURE" '.environment.data.NOPE')" ""
 
 echo ""
-echo "== awk env key listing =="
+echo "== env key listing =="
 keys=$(values_env_keys "$FIXTURE" | sort | tr '\n' ',')
 check "environment.data keys" "$keys" "ORGANISATIONS_TO_SYNC,PORT,PORTKEY_CLIENT_AUTH,"
-
-if command -v yq &>/dev/null; then
-  echo ""
-  echo "== yq agrees with the fallback =="
-  for path in \
-    .imageCredentials[0].registry \
-    .imageCredentials[0].username \
-    .imageCredentials[0].password \
-    .environment.data.PORTKEY_CLIENT_AUTH \
-    .environment.data.ORGANISATIONS_TO_SYNC \
-    .environment.data.PORT \
-    .service.port \
-    .service.containerPort; do
-    yq_val=$(yq -r "$path // \"\"" "$FIXTURE" 2>/dev/null)
-    [ "$yq_val" = "null" ] && yq_val=""
-    awk_val=$(values_get_awk "$FIXTURE" "$path")
-    check "$path" "$awk_val" "$yq_val"
-  done
-else
-  echo ""
-  echo "  (yq not installed — cross-check skipped)"
-fi
 
 echo ""
 echo "== secret round-trip through env_quote + load_env =="
@@ -111,6 +91,31 @@ else
   printf '  ok    %-42s = nothing executed\n' "safe to source directly"
   PASS=$((PASS + 1))
 fi
+
+echo ""
+echo "== --version pin persisted to .env =="
+# A pinned tag must replace the stored one in place and leave every other line,
+# secrets included, byte-for-byte intact; a file without the key gets it appended.
+ENV_FILE="$TMP_ENV"
+{
+  printf '# header\n'
+  printf 'REGISTRY_PASSWORD=%s\n' "$(env_quote "$NASTY")"
+  printf "GATEWAY_IMAGE_TAG='2.15.0'\n"
+  printf "PORT='8787'\n"
+} >"$ENV_FILE"
+before_other=$(grep -v '^GATEWAY_IMAGE_TAG=' "$ENV_FILE")
+GATEWAY_IMAGE_TAG="2.21.0" persist_image_tag
+check "tag replaced in place" "$(sed -n 3p "$ENV_FILE")" "GATEWAY_IMAGE_TAG='2.21.0'"
+check "tag line not duplicated" "$(grep -c '^GATEWAY_IMAGE_TAG=' "$ENV_FILE")" "1"
+check "other lines untouched" "$(grep -v '^GATEWAY_IMAGE_TAG=' "$ENV_FILE")" "$before_other"
+unset REGISTRY_PASSWORD GATEWAY_IMAGE_TAG
+load_env "$ENV_FILE"
+check "secret still loads intact" "${REGISTRY_PASSWORD:-}" "$NASTY"
+check "pinned tag loads back" "${GATEWAY_IMAGE_TAG:-}" "2.21.0"
+
+printf "PORT='8787'\n" >"$ENV_FILE"
+GATEWAY_IMAGE_TAG="2.22.0" persist_image_tag
+check "tag appended when absent" "$(tail -1 "$ENV_FILE")" "GATEWAY_IMAGE_TAG='2.22.0'"
 
 echo ""
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"

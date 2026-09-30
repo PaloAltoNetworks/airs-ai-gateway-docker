@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-30
+
+### Changed
+
+- `values.yaml` is always read by the built-in `awk` reader. `yq` is no longer used even when
+  installed, so the same file parses identically on every host.
+- The healthcheck client is detected with one container run instead of two.
+
+### Fixed
+
+- `--version TAG` is now recorded in `.env`. It used to apply to that run only, so the next plain
+  re-run silently rolled the gateway back to the stored tag.
+- A re-run where only `.env` changed now applies the change. The early exit used to compare image
+  digests only, so the new setting was silently ignored until `--force-pull`. It now also requires
+  the generated `.env.runtime` and `docker-compose.yml` to be unchanged (F-109).
+
+### Removed
+
+- The undocumented `--from-values=FILE` and `--version=TAG` forms. Use `--from-values FILE` and
+  `--version TAG`.
+
 ## [0.1.1] - 2026-09-30
 
 ### Changed
@@ -70,5 +91,6 @@ to the control plane with the deployment reporting `healthy` in SCM.
 - Out of scope, use the Helm chart: dataservice, MinIO, Milvus, autoscaling, ingress, Vault
   injection, and cloud IAM auth modes that derive identity from a Kubernetes ServiceAccount.
 
+[0.2.0]: https://github.com/PaloAltoNetworks/airs-ai-gateway-docker/releases/tag/v0.2.0
 [0.1.1]: https://github.com/PaloAltoNetworks/airs-ai-gateway-docker/releases/tag/v0.1.1
 [0.1.0]: https://github.com/PaloAltoNetworks/airs-ai-gateway-docker/releases/tag/v0.1.0

@@ -25,7 +25,7 @@ is empty.
 - One command from a downloaded `values.yaml` to a running gateway.
 - Faithfully reproduce what `helm template` renders, including the defaults the chart hides.
 - Ship a hardened-by-default stack matching the chart's own security context.
-- Be safe to re-run: idempotent, exits early when the digest is unchanged.
+- Be safe to re-run: idempotent, exits early when the digest and generated config are unchanged.
 - Leave a credential-free audit trail for SOC 2 / ISO 27001.
 - Be explicit about what is out of scope, and point to Helm for it.
 
@@ -46,7 +46,7 @@ is empty.
 | Reproduce all six chart workloads | Milvus and etcd are cluster-shaped; a single-host copy invites a deployment nobody should run in production. ADR-003. |
 | Ship a `docker run` snippet in docs | Pushes the eight-variable merge onto the user by hand — exactly the failure this removes. |
 | Rewrite the installer in Go/Rust | Heavier toolchain and release pipeline for a thin orchestration layer. |
-| Require `yq` | Breaks the portability promise on hosts where installing it needs a change ticket. ADR-004. |
+| Require `yq` | Breaks the portability promise on hosts where installing it needs a change ticket. |
 
 ## 5. Users
 
@@ -87,7 +87,8 @@ Priority key: **P0** core install path; **P1** important; **P2** convenience.
   `docker-compose.yml`, start the stack.
 - **FR3 — Redis topology (P0).** Bundled Redis by default; omitted entirely when the operator points
   `CACHE_STORE`/`REDIS_URL` at a managed cache.
-- **FR4 — Idempotent re-run (P1).** Unchanged digest with a running container exits early.
+- **FR4 — Idempotent re-run (P1).** Unchanged digest and generated config with a running container
+  exits early; a config-only change is re-applied.
 - **FR5 — Status / validate / diagnose.** `--status` (P1); `--validate` probes `/v1/health` plus
   control-plane reachability (P0 — how success is confirmed); `--diagnose` pattern-matches logs (P2).
 - **FR6 — Update (P1).** `--version TAG` pins; `--force-pull` re-pulls a repushed tag.
@@ -103,7 +104,7 @@ Priority key: **P0** core install path; **P1** important; **P2** convenience.
 - **Fidelity.** The generated environment must match `helm template` for the default topology. The
   eight inherited defaults are the specific regression risk (ADR-006).
 - **Portability.** Linux (x86_64, aarch64) and macOS; bash 3.2 compatible; `curl` the only hard
-  dependency; `yq` optional.
+  dependency.
 - **Robustness.** `set -euo pipefail`; guarded command substitutions so a no-match `grep` cannot
   abort a run; `die()` for fatal errors.
 - **Auditability.** Every install and pull appended to `deploy.log` with timestamp and digest, no
@@ -146,7 +147,7 @@ No telemetry ships, so these are measured out-of-band:
   prepared host.
 - **Config fidelity** — the resolved environment matches `helm template` for the default topology.
   Verifiable locally, and the one thing worth a CI check.
-- **Idempotent re-run** — unchanged digest exits early without restarting the container.
+- **Idempotent re-run** — unchanged digest and config exits early without restarting the container.
 - **Zero secret leakage** — nothing in `deploy.log`, `ps`, or committed files.
 
 ## 12. Risks and open items
