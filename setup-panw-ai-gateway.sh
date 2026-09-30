@@ -26,7 +26,7 @@ set -euo pipefail
 
 # --- Constants ---
 
-SCRIPT_VERSION="0.1.1"
+SCRIPT_VERSION="0.2.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 RUNTIME_ENV_FILE="${SCRIPT_DIR}/.env.runtime"
