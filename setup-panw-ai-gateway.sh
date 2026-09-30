@@ -223,18 +223,10 @@ while [ $# -gt 0 ]; do
       VALUES_FILE="$2"
       shift 2
       ;;
-    --from-values=*)
-      VALUES_FILE="${1#*=}"
-      shift
-      ;;
     --version)
       [ $# -ge 2 ] || die "--version requires a tag (e.g. 2.21.0)"
       PIN_TAG="$2"
       shift 2
-      ;;
-    --version=*)
-      PIN_TAG="${1#*=}"
-      shift
       ;;
     --dry-run)
       DRY_RUN=true

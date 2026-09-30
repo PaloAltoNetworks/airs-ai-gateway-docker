@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `values.yaml` is always read by the built-in `awk` reader. `yq` is no longer used even when
   installed, so the same file parses identically on every host.
 
+### Removed
+
+- The undocumented `--from-values=FILE` and `--version=TAG` forms. Use `--from-values FILE` and
+  `--version TAG`.
+
 ## [0.1.1] - 2026-09-30
 
 ### Changed
