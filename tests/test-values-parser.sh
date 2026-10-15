@@ -23,6 +23,8 @@ eval "$(extract_fn env_quote)"
 eval "$(extract_fn load_env)"
 eval "$(extract_fn emit_env)"
 eval "$(extract_fn persist_image_tag)"
+eval "$(extract_fn write_runtime_env)"
+eval "$(awk '/^(CORE_ENV|CACHE_STORE|LOG_STORE|NON_RUNTIME)_KEYS=\(/,/^\)/' "$INSTALLER")"
 
 PASS=0
 FAIL=0
@@ -116,6 +118,32 @@ check "pinned tag loads back" "${GATEWAY_IMAGE_TAG:-}" "2.21.0"
 printf "PORT='8787'\n" >"$ENV_FILE"
 GATEWAY_IMAGE_TAG="2.22.0" persist_image_tag
 check "tag appended when absent" "$(tail -1 "$ENV_FILE")" "GATEWAY_IMAGE_TAG='2.22.0'"
+
+echo ""
+echo "== .env.runtime pass-through =="
+# Keys the installer does not know (TRUSTED_CUSTOM_HOSTS and the like) reach the
+# container, as the chart passes all of environment.data; the installer's own
+# keys do not, and the bundled Redis settings win over a stray CACHE_STORE.
+{
+  printf "REGISTRY_PASSWORD=%s\n" "$(env_quote "$NASTY")"
+  printf "GATEWAY_IMAGE_TAG='2.21.0'\n"
+  printf "HOST_PORT='8787'\n"
+  printf "PORTKEY_CLIENT_AUTH='client-auth'\n"
+  printf "CACHE_STORE='memory'\n"
+  printf "TRUSTED_CUSTOM_HOSTS='10.0.0.5,*.svc'\n"
+} >"$ENV_FILE"
+# shellcheck disable=SC2034 # read by the extracted load_env and write_runtime_env
+RESOLVED_KEYS=""
+load_env "$ENV_FILE"
+TMP_RUNTIME=$(mktemp)
+SCRIPT_VERSION=test REDIS_SERVICE=airs-gw-redis write_runtime_env false "$TMP_RUNTIME"
+unset TRUSTED_CUSTOM_HOSTS
+load_env "$TMP_RUNTIME"
+check "unknown key passed through" "${TRUSTED_CUSTOM_HOSTS:-}" "10.0.0.5,*.svc"
+check "core key still written" "$(grep -c '^PORTKEY_CLIENT_AUTH=' "$TMP_RUNTIME")" "1"
+check "bundled redis wins" "$(grep '^CACHE_STORE=' "$TMP_RUNTIME")" "CACHE_STORE='redis'"
+check "installer keys not passed" "$(grep -cE '^(REGISTRY_|GATEWAY_IMAGE_|HOST_PORT=)' "$TMP_RUNTIME")" "0"
+rm -f "$TMP_RUNTIME"
 
 echo ""
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
