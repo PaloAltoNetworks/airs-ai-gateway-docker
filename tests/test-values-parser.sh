@@ -137,9 +137,7 @@ RESOLVED_KEYS=""
 load_env "$ENV_FILE"
 TMP_RUNTIME=$(mktemp)
 SCRIPT_VERSION=test REDIS_SERVICE=airs-gw-redis write_runtime_env false "$TMP_RUNTIME"
-unset TRUSTED_CUSTOM_HOSTS
-load_env "$TMP_RUNTIME"
-check "unknown key passed through" "${TRUSTED_CUSTOM_HOSTS:-}" "10.0.0.5,*.svc"
+check "unknown key passed through" "$(grep '^TRUSTED_CUSTOM_HOSTS=' "$TMP_RUNTIME")" "TRUSTED_CUSTOM_HOSTS='10.0.0.5,*.svc'"
 check "core key still written" "$(grep -c '^PORTKEY_CLIENT_AUTH=' "$TMP_RUNTIME")" "1"
 check "bundled redis wins" "$(grep '^CACHE_STORE=' "$TMP_RUNTIME")" "CACHE_STORE='redis'"
 check "installer keys not passed" "$(grep -cE '^(REGISTRY_|GATEWAY_IMAGE_|HOST_PORT=)' "$TMP_RUNTIME")" "0"
