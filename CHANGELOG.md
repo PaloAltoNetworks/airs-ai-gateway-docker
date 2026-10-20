@@ -5,17 +5,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- `environment.data` keys outside the installer's fixed lists, and keys added to `.env` by hand,
-  now reach the gateway container. `.env.runtime` used to be written from fixed key lists only, so
-  a setting such as `TRUSTED_CUSTOM_HOSTS` landed in `.env` and was silently dropped. Everything
-  else now passes through, as the chart passes all of `environment.data`; the installer's own keys
-  (registry, image, host ports, `INSECURE_SKIP_TLS_VERIFY`) stay out.
-
-## [0.2.0] - 2026-09-30
+## [0.2.0] - 2026-10-20
 
 ### Changed
 
@@ -30,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A re-run where only `.env` changed now applies the change. The early exit used to compare image
   digests only, so the new setting was silently ignored until `--force-pull`. It now also requires
   the generated `.env.runtime` and `docker-compose.yml` to be unchanged (F-109).
+- `environment.data` keys outside the installer's fixed lists, and keys added to `.env` by hand,
+  now reach the gateway container. `.env.runtime` used to be written from fixed key lists only, so
+  a setting such as `TRUSTED_CUSTOM_HOSTS` landed in `.env` and was silently dropped. Everything
+  else now passes through, as the chart passes all of `environment.data`; the installer's own keys
+  (registry, image, host ports, `INSECURE_SKIP_TLS_VERIFY`) stay out.
 
 ### Removed
 
