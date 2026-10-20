@@ -96,6 +96,14 @@ CORE_ENV_KEYS=(
   ALBUS_BASEPATH CONTROL_PLANE_BASEPATH MCP_GATEWAY_BASE_URL
 )
 
+# .env keys the installer itself consumes (or writes above); not passed through.
+NON_RUNTIME_KEYS=(
+  REGISTRY_HOST REGISTRY_USERNAME REGISTRY_PASSWORD
+  GATEWAY_IMAGE_REPO GATEWAY_IMAGE_TAG REDIS_IMAGE
+  HOST_PORT HOST_MCP_PORT INSECURE_SKIP_TLS_VERIFY
+  HTTP_PROXY HTTPS_PROXY NO_PROXY
+)
+
 # Outbound endpoints the data plane needs (docs/OutboundAPIs.md upstream).
 EGRESS_HOSTS=(
   "mp.us.prod.airs-gw.portkey.ai|Management plane (config sync)"
@@ -269,6 +277,7 @@ load_env() {
         value="${value//"$esc"/$q}"
       fi
       export "$key=$value"
+      RESOLVED_KEYS="${RESOLVED_KEYS:-}${key} "
     fi
   done <"$file"
 }
@@ -595,6 +604,17 @@ write_runtime_env() {
       done
 
       for key in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+        emit_env "$key" "${!key:-}"
+      done
+
+      # Everything else from environment.data or .env (TRUSTED_CUSTOM_HOSTS and
+      # the like) passes through, as the chart passes all of environment.data.
+      # Intentionally unquoted: RESOLVED_KEYS is a space-separated key list.
+      # shellcheck disable=SC2086
+      for key in $(printf '%s\n' $RESOLVED_KEYS | sort -u); do
+        case " ${CORE_ENV_KEYS[*]} ${CACHE_STORE_KEYS[*]} ${LOG_STORE_KEYS[*]} ${NON_RUNTIME_KEYS[*]} " in
+          *" $key "*) continue ;;
+        esac
         emit_env "$key" "${!key:-}"
       done
 
