@@ -1,0 +1,3 @@
+# Keep LF on every platform. A Windows checkout with core.autocrlf would turn
+# the scripts into CRLF, which bash rejects ($'\r': command not found).
+* text=auto eol=lf

@@ -5,7 +5,8 @@
 - **Bash** — single script, `set -euo pipefail`, shebang `#!/usr/bin/env bash`. Bash 3.2 compatible
   (macOS ships 3.2, so no associative arrays).
 - **curl** — health probes and egress checks. HTTPS-only (`--proto =https`).
-- **awk** — the `values.yaml` reader, with `yq` used instead when present (ADR-004).
+- **awk** — the `values.yaml` reader. Deliberately not a general YAML parser: it handles the shapes
+  SCM emits and returns empty for anything else, so callers apply their own defaults.
 - **Docker** + **Docker Compose** (v1 or v2) — runs the stack from a generated, hardened compose file.
 
 `curl` is the only hard startup dependency (checked by `require_basics`). Docker is checked by
@@ -18,7 +19,7 @@ The whole tool is `setup-panw-ai-gateway.sh`. Internal organization is by functi
 | Group | Names | Role |
 |---|---|---|
 | Modes | `do_install`, `do_from_values`, `do_status`, `do_validate`, `do_diagnose` | One per CLI mode; dispatched at the bottom |
-| Values ingestion | `values_get`, `values_get_awk`, `values_env_keys` | Read the SCM `values.yaml` |
+| Values ingestion | `values_get`, `values_env_keys` | Read the SCM `values.yaml` |
 | Generation | `write_runtime_env`, `write_compose`, `detect_health_client` | Emit `.env.runtime` and `docker-compose.yml` |
 | Config | `load_env`, `env_quote`, `emit_env` | Read/write `.env`, safely |
 | Helpers | `die`, `info`/`warn`/`error`, `http_probe`, `log_deploy`, `version_ge`, `validate_uuid` | Cross-cutting |
@@ -88,14 +89,18 @@ Bundled by default, matching the chart. When the operator sets `CACHE_STORE` to 
 - The registry password reaches `docker login` via `--password-stdin`, never argv, so it is
   invisible in `ps`.
 - Credential-handling paths disable shell tracing (`set +x`).
-- `--dry-run` redacts everything in `SECRET_KEYS` before printing.
+- `--dry-run` prints only `CORE_ENV_KEYS` and redacts `PORTKEY_CLIENT_AUTH`, the one secret among
+  them. Widening what it prints means widening the redaction too.
 - `deploy.log` records image digests and timestamps, never secrets.
 - Keys read from `values.yaml` are validated against `^[A-Za-z_][A-Za-z0-9_]*$` before export, so a
   malformed file cannot inject `PATH` or `LD_PRELOAD`.
 
 ## CI / release
 
-- Lint workflow: ShellCheck + shfmt (2-space) on push and PR.
+- Lint workflow: ShellCheck + shfmt (2-space) on push and PR, plus `tests/*.sh` across bash
+  3.2 / 4.4 / 5.2 (busybox), Debian (mawk), Ubuntu (GNU), macOS `/bin/bash` 3.2 (BSD) and Windows
+  Git Bash.
+- `.gitattributes` forces LF so a Windows checkout does not hand bash CRLF scripts.
 - Release workflow on tag push: attaches the `.sh` plus a Sigstore build-provenance attestation,
   body is changelog-only.
 - All GitHub Actions SHA-pinned (org rule).

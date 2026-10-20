@@ -5,9 +5,13 @@ on:
     branches: [main, develop]
     paths:
       - "**.sh"
+      - "tests/**"
+      - ".github/workflows/lint.yml"
   pull_request:
     paths:
       - "**.sh"
+      - "tests/**"
+      - ".github/workflows/lint.yml"
 
 permissions:
   contents: read
@@ -25,4 +29,59 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run shfmt
-        run: docker run --rm -v "$PWD:/work" -w /work mvdan/shfmt:v3.13.1 -d -i 2 -ci setup-panw-ai-gateway.sh
+        run: docker run --rm -v "$PWD:/work" -w /work mvdan/shfmt:v3.13.1 -d -i 2 -ci setup-panw-ai-gateway.sh tests/
+
+  # The installer promises bash 3.2+ on Linux, macOS and Windows (Git Bash),
+  # with whatever awk/sort the host ships. Each cell runs the same two tests.
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: bash 3.2, busybox
+            os: ubuntu-latest
+            image: bash:3.2
+            setup: apk add -q --no-cache curl
+          - name: bash 4.4, busybox
+            os: ubuntu-latest
+            image: bash:4.4
+            setup: apk add -q --no-cache curl
+          - name: bash 5.2, busybox
+            os: ubuntu-latest
+            image: bash:5.2
+            setup: apk add -q --no-cache curl
+          - name: Debian, mawk
+            os: ubuntu-latest
+            image: debian:stable-slim
+            setup: apt-get -qq update && apt-get -qq install -y curl >/dev/null
+          - name: Ubuntu, GNU userland
+            os: ubuntu-latest
+            bash: bash
+          # Pin the system bash 3.2 and BSD tools, not Homebrew's.
+          - name: macOS bash 3.2, BSD awk
+            os: macos-latest
+            bash: env PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash
+          - name: Windows, Git Bash
+            os: windows-latest
+            bash: bash
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run tests
+        env:
+          IMAGE: ${{ matrix.image }}
+          SETUP: ${{ matrix.setup }}
+          BASH_CMD: ${{ matrix.bash }}
+        run: |
+          if [ -n "$IMAGE" ]; then
+            docker run --rm -v "$PWD:/w" -w /w "$IMAGE" sh -c \
+              "$SETUP && bash tests/test-values-parser.sh && bash tests/test-dry-run.sh"
+          else
+            # Intentionally unquoted: BASH_CMD may carry an env prefix.
+            $BASH_CMD tests/test-values-parser.sh
+            $BASH_CMD tests/test-dry-run.sh
+          fi

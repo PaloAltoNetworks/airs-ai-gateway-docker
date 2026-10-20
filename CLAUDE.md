@@ -29,7 +29,7 @@ These are the source of truth. Point to them; don't restate their content here.
   The full inherited set is tabulated in `docs/reference.md`.
 - Honor the security model in `docs/ARCHITECTURE.md`: never write secrets to `deploy.log`, process
   listings, or committed files. Watch the `set -euo pipefail` grep-abort trap.
-- Ask before adding a new runtime dependency. `yq` is an optional fast path, never required.
+- Ask before adding a new runtime dependency, optional ones included.
 - Never commit generated files: `docker-compose.yml`, `.env*`, `deploy.log`, `values.yaml`.
   Test fixtures use redacted credentials only.
 - All GitHub Actions MUST be SHA-pinned (org rule).

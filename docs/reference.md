@@ -25,7 +25,7 @@ Full configuration, operations, and migration guide for the Prisma AIRS AI Gatew
 |---|---|
 | **Docker** | 20.10+, with Docker Compose (v1 or v2) |
 | **OS** | Linux (x86_64, aarch64) or macOS (Intel, Apple Silicon) |
-| **Tools** | `curl` required; `yq` optional (used for exact YAML parsing when present) |
+| **Tools** | `curl` |
 | **Network** | Outbound HTTPS — see [Egress](#egress-requirements) |
 | **Input** | `values.yaml` from SCM → AI Gateway → Gateway Registration |
 
@@ -344,14 +344,18 @@ an inference request that shows up in the SCM AI Gateway log view.
 
 ### Updating
 
-Re-run the installer. It pulls the configured tag, compares digests, and exits early when nothing
-changed:
+Re-run the installer. It pulls the configured tag, compares the digest and the generated config, and
+exits early when nothing changed. Edits to `.env` are picked up on the next run, no `--force-pull`
+needed:
 
 ```bash
 ./setup-panw-ai-gateway.sh                     # current tag
 ./setup-panw-ai-gateway.sh --version 2.16.0    # move to a new tag
 ./setup-panw-ai-gateway.sh --force-pull        # same tag, repushed
 ```
+
+`--version` is recorded as `GATEWAY_IMAGE_TAG` in `.env` once the pull succeeds, so later plain
+re-runs stay on it.
 
 Minimum supported gateway version is `2.15.0`; the installer warns below that.
 
